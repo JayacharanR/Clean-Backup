@@ -8,3 +8,6 @@ wheels/
 todo.md
 # Virtual environments
 .venv
+logs
+test_source
+test_dest
