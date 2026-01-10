@@ -1,4 +1,4 @@
-from src.organiser import organise_files
+from src.organiser import organise_files, print_summary
 
 def main():
     source=None
@@ -9,8 +9,9 @@ def main():
         source = input("Enter source folder path: ")
         destination = input("Enter destination folder path: ")
         if source and destination:
-            organise_files(source, destination)
-            print("\nOrganization complete! Check logs for details.")
+            stats = organise_files(source, destination)
+            print_summary(stats)
+            print("Check logs for detailed information!")
         else:
             print("Source and Destination paths are required.")
 
