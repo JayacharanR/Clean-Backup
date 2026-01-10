@@ -13,12 +13,13 @@ This project is built with open-source principles in mind, avoiding heavy extern
   - **Videos**: Extracts creation date metadata (supports MP4, MOV, AVI, MKV, etc.).
 - **Smart Fallback**: Uses file system modification time if metadata is missing.
 - **Duplicate Handling**: Skips files if they already exist in the destination to prevent overwrites.
+- **Summary Report**: Displays a detailed summary after organization completes.
 - **Logging**: Generates detailed logs of all operations in the `logs/` directory.
 - **Pure Python**: Easy to install and run without complex system dependencies.
 
 ## 📋 Supported Formats
 
-- **Images**: `.jpg`, `.jpeg`, `.png`, `.heic`, `.bmp`, `.tiff`, `.gif`
+- **Images**: `.jpg`, `.jpeg`, `.png`, `.heic`, `.bmp`, `.tiff`, `.gif`, `.raf`
 - **Videos**: `.mp4`, `.mov`, `.avi`, `.mkv`, `.wmv`, `.flv`, `.webm`
 
 ## 🛠️ Installation
@@ -53,6 +54,28 @@ Follow the interactive prompts:
 2. Enter the **Destination Folder Path** (where you want them organized).
 
 The script will process the files and generate a log file in the `logs/` folder.
+
+### 📊 Summary Report
+
+After organization completes, you'll see a detailed summary, Example snippet:
+```
+==================================================
+           📊 SUMMARY REPORT
+==================================================
+
+✅ 1,240 files scanned
+📸 820 images
+🎥 420 videos
+
+🗂  Organized into:
+   - 2022/November (340 files)
+   - 2023/May (210 files)
+
+⚠️  34 duplicates detected (skipped)
+
+✨ 1,186 files successfully moved!
+==================================================
+```
 
 ## 📂 Project Structure
 
