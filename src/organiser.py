@@ -5,7 +5,7 @@ from src import constants
 from src.metadata import get_image_date, get_video_date, get_file_modification_date
 from src.logger import logger
 
-def organise_files(src_dir, dest_dir):
+def organise_files(src_dir, dest_dir, operation='move'):
     src_path = Path(src_dir)
     dest_path = Path(dest_dir)
     
@@ -16,7 +16,7 @@ def organise_files(src_dir, dest_dir):
         'videos': 0,
         'other': 0,
         'duplicates': 0,
-        'moved': 0,
+        'processed': 0,
         'errors': 0,
         'folders_created': defaultdict(int)  # {"2022/November": count}
     }
@@ -62,24 +62,28 @@ def organise_files(src_dir, dest_dir):
             
             target_file = target_folder / file_path.name
 
-            # move to target dest
+            # transfer to target dest (move or copy)
             if target_file.exists():
                 stats['duplicates'] += 1
                 logger.info(f"Skipped duplicate: {file_path.name} already exists in {target_folder}")
             else:
                 try:
-                    shutil.move(str(file_path), str(target_file))
-                    stats['moved'] += 1
+                    if operation == 'copy':
+                        shutil.copy2(str(file_path), str(target_file))
+                        logger.info(f"Copied: {file_path.name} -> {target_folder}")
+                    else:
+                        shutil.move(str(file_path), str(target_file))
+                        logger.info(f"Moved: {file_path.name} -> {target_folder}")
+                    stats['processed'] += 1
                     stats['folders_created'][folder_key] += 1
-                    logger.info(f"Moved: {file_path.name} -> {target_folder}")
                 except Exception as e:
                     stats['errors'] += 1
-                    logger.error(f"Error moving {file_path.name}: {e}")
+                    logger.error(f"Error {operation}ing {file_path.name}: {e}")
     
     return stats
 
 
-def print_summary(stats):
+def print_summary(stats, operation='move'):
     """Print a formatted summary report of the organization operation."""
     print("\n" + "=" * 50)
     print("           📊 SUMMARY REPORT")
@@ -89,8 +93,11 @@ def print_summary(stats):
     total = f"{stats['total_scanned']:,}"
     images = f"{stats['images']:,}"
     videos = f"{stats['videos']:,}"
-    moved = f"{stats['moved']:,}"
+    processed = f"{stats['processed']:,}"
     duplicates = f"{stats['duplicates']:,}"
+    
+    # Determine action word based on operation
+    action_word = "copied" if operation == 'copy' else "moved"
     
     print(f"\n✅ {total} files scanned")
     print(f"📸 {images} images")
@@ -113,7 +120,7 @@ def print_summary(stats):
     if stats['errors'] > 0:
         print(f"\n❌ {stats['errors']:,} errors occurred")
     
-    print(f"\n✨ {moved} files successfully moved!")
+    print(f"\n✨ {processed} files successfully {action_word}!")
     print("=" * 50 + "\n")
 
 if __name__ == "__main__":
