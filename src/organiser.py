@@ -4,8 +4,19 @@ from collections import defaultdict
 from src import constants
 from src.metadata import get_image_date, get_video_date, get_file_modification_date
 from src.logger import logger
+from src.phash import find_duplicates, is_rust_available, THRESHOLD_SIMILAR
 
-def organise_files(src_dir, dest_dir, operation='move'):
+def organise_files(src_dir, dest_dir, operation='move', check_duplicates=False, duplicate_threshold=THRESHOLD_SIMILAR):
+    """
+    Organize media files into year/month folders.
+    
+    Args:
+        src_dir: Source directory
+        dest_dir: Destination directory
+        operation: 'move' or 'copy'
+        check_duplicates: If True, detect and skip duplicate images before organizing
+        duplicate_threshold: Hamming distance threshold for duplicate detection
+    """
     src_path = Path(src_dir)
     dest_path = Path(dest_dir)
     
@@ -16,14 +27,39 @@ def organise_files(src_dir, dest_dir, operation='move'):
         'videos': 0,
         'other': 0,
         'duplicates': 0,
+        'perceptual_duplicates': 0,
         'processed': 0,
         'errors': 0,
         'folders_created': defaultdict(int)  # {"2022/November": count}
     }
     
+    # Perceptual duplicate detection (if enabled)
+    duplicate_files = set()  # Files to skip due to perceptual duplication
+    if check_duplicates:
+        logger.info(f"Scanning for perceptual duplicates using {'Rust (phash_rs)' if is_rust_available() else 'Python fallback'}...")
+        duplicate_groups = find_duplicates(str(src_path), threshold=duplicate_threshold)
+        
+        if duplicate_groups:
+            logger.info(f"Found {len(duplicate_groups)} duplicate groups")
+            for group in duplicate_groups:
+                # Mark all duplicates except the best one
+                for dup_path in group.duplicates:
+                    # Use absolute path for consistent comparison
+                    duplicate_files.add(Path(dup_path).resolve())
+                    stats['perceptual_duplicates'] += 1
+                logger.info(f"Duplicate group: keeping {group.best}, skipping {len(group.duplicates)} duplicates")
+        else:
+            logger.info("No perceptual duplicates found")
+    
     for file_path in src_path.rglob('*'):  # recursive glob search 
         if file_path.is_file():
             stats['total_scanned'] += 1
+            
+            # Skip perceptual duplicates (use absolute path for comparison)
+            if check_duplicates and file_path.resolve() in duplicate_files:
+                logger.info(f"Skipping perceptual duplicate: {file_path.name}")
+                continue
+            
             ext = file_path.suffix.lower()
             
             # Track file type
@@ -114,7 +150,11 @@ def print_summary(stats, operation='move'):
     
     # Show duplicates warning
     if stats['duplicates'] > 0:
-        print(f"\n⚠️  {duplicates} duplicates detected (skipped)")
+        print(f"\n⚠️  {duplicates} name-based duplicates detected (skipped)")
+    
+    # Show perceptual duplicates
+    if stats.get('perceptual_duplicates', 0) > 0:
+        print(f"🔍 {stats['perceptual_duplicates']:,} perceptual duplicates detected (skipped)")
     
     # Show errors if any
     if stats['errors'] > 0:

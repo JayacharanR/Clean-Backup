@@ -1,0 +1,20 @@
+[package]
+name = "phash_rs"
+version = "0.1.0"
+edition = "2021"
+description = "Fast perceptual image hashing library with Python bindings"
+license = "MIT"
+
+[lib]
+name = "phash_rs"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pyo3 = { version = "0.22", features = ["extension-module"] }
+image = "0.25"
+rayon = "1.10"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
