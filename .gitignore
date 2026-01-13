@@ -5,9 +5,13 @@ build/
 dist/
 wheels/
 *.egg-info
-todo.md
+
 # Virtual environments
 .venv
+
+#omit
+todo.md
+explanation.md
 logs
 test_source
 test_dest
