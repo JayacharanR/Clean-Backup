@@ -1,108 +1,108 @@
 # Clean-Backup
 
-**Clean-Backup** is a lightweight, pure-Python automation tool designed to organize your photo and video collections. It scans your media files, extracts their creation dates (using EXIF data for images and metadata for videos), and sorts them into a structured `Year/Month` directory hierarchy.
+**An intelligent, high-performance media organization automation tool featuring perceptual deduplication and hybrid Python-Rust architecture.**
 
-This project is built with open-source principles in mind, avoiding heavy external dependencies like FFmpeg in favor of reliable Python libraries.
+![Python](https://img.shields.io/badge/Python-3.10%2B-blue) ![Rust](https://img.shields.io/badge/Rust-Enabled-orange) ![License](https://img.shields.io/badge/License-MIT-green)
 
-## 🚀 Features
+## 📖 Overview
 
-- **Automatic Sorting**: Moves files into `Destination/Year/Month/` folders.
-- **Metadata Extraction**:
-  - **Images**: Extracts EXIF `DateTimeOriginal` (supports JPG, PNG, TIFF, BMP, GIF).
-  - **HEIC Support**: Native support for Apple's High Efficiency Image Format.
-  - **Videos**: Extracts creation date metadata (supports MP4, MOV, AVI, MKV, etc.).
-- **Smart Fallback**: Uses file system modification time if metadata is missing.
-- **Duplicate Handling**: Skips files if they already exist in the destination to prevent overwrites.
-- **Summary Report**: Displays a detailed summary after organization completes.
-- **Logging**: Generates detailed logs of all operations in the `logs/` directory.
-- **Pure Python**: Easy to install and run without complex system dependencies.
+**Clean-Backup** is a sophisticated CLI utility designed to solve the chaos of unorganized digital media libraries. Unlike traditional organizers that rely solely on file names or modification dates, Clean-Backup employs deep metadata extraction and **perceptual hashing algorithms** to intelligently sort, categorize, and deduplicate assets.
 
-## 📋 Supported Formats
+Core engineering highlights include a **hybrid architecture** where performance-critical image analysis is offloaded to a custom **Rust** module (`phash_rs`), ensuring rapid processing of large libraries while maintaining Python's ease of use.
 
-- **Images**: `.jpg`, `.jpeg`, `.png`, `.heic`, `.bmp`, `.tiff`, `.gif`, `.raf`
-- **Videos**: `.mp4`, `.mov`, `.avi`, `.mkv`, `.wmv`, `.flv`, `.webm`
+## 🚀 Key Technical Features
 
-## 🛠️ Installation
+### 📂 Temporal Asset Organization
+*   **Metadata-Driven Sorting**: Extracts embedded EXIF `DateTimeOriginal` (images) and container metadata (videos) to restructure files into a standardized `Year/Month` hierarchy.
+*   **Smart Fallbacks**: Heuristic fallback mechanism handles missing metadata by analyzing file system stats.
+*   **Cross-Format Support**: Native handling for HEIC (Apple), RAW formats (RAF), and standard web formats.
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/JayacharanR/Clean-Backup.git
-   cd Clean-Backup
-   ```
+### 🔍 Perceptual Deduplication (pHash)
+*   **Beyond Checksums**: Uses Perceptual Hashing (pHash) rather than binary checksums (MD5/SHA), allowing detection of "visual" duplicates even if the file has been resized, re-compressed, or converted to a different format.
+*   **Rust Acceleration**: Integrated highly concurrent Rust extension for computing image hashes, offering significant speed improvements over pure Python implementations.
+*   **Cross-Directory Scanning**: Prevents importing duplicates by scanning both the source queue and the existing destination library.
 
-2. **Set up a virtual environment (Recommended)**
-   ```bash
-   python -m venv .venv
-   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-   ```
+### ⚙️ Configurable Heuristics
+*   **Tunable Sensitivity**: User-configurable Hamming distance threshold allows fine-tuning between "Exact Match" (strict) and "Visual Similarity" (loose/aggressive) modes.
+*   **Persistent Configuration**: Settings are serialized and persisted between sessions.
 
-3. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
+## 🛠️ Architecture
 
-## 💻 Usage
+The project follows a modular architecture:
 
-Run the main script from the terminal:
+*   **`src/organiser.py`**: Core logic for file system operations and metadata parsing.
+*   **`src/duplicate_handler.py`**: Manages duplicate detection workflows and reporting.
+*   **`src/phash.py`**: Bridge interface between Python and the underlying Rust engine.
+*   **`phash_rs/`**: Rust crate providing high-performance implementation of perceptual hashing algorithms (DHash/pHash).
+
+## 💻 Tech Stack
+
+*   **Languages**: Python 3.12+, Rust (2021 Edition)
+*   **Libraries**: 
+    *   `Pillow` / `pillow-heif`: Image processing and HEIC support.
+    *   `hachoir`: Video metadata extraction.
+    *   `maturin`: Bridge for building Rust binaries as Python modules.
+
+## 📥 Installation
+
+1.  **Clone the Repository**
+    ```bash
+    git clone https://github.com/JayacharanR/Clean-Backup.git
+    cd Clean-Backup
+    ```
+
+2.  **Environment Setup**
+    ```bash
+    python -m venv .venv
+    source .venv/bin/activate  # Windows: .venv\Scripts\activate
+    pip install -r requirements.txt
+    ```
+
+    *(Note: To enable Rust acceleration, ensure the `phash_rs` module is built and installed in your environment.)*
+
+## 🕹️ Usage
+
+Execute the entry point:
 
 ```bash
 python main.py
 ```
 
-Follow the interactive prompts:
-1. Enter the **Source Folder Path** (where your messy files are).
-2. Enter the **Destination Folder Path** (where you want them organized).
+The interactive CLI provides three modes:
 
-The script will process the files and generate a log file in the `logs/` folder.
+### Mode 1: Organize Files by Date
+Scans a source directory and migrates files to a destination according to `YYYY/Month` structure.
+*   **Operations**: Move or Copy.
+*   **Pre-flight Check**: Optional perceptual scan to skip incoming files that visually match existing assets.
 
-### 📊 Summary Report
+### Mode 2: Deduplication Utility
+A standalone tool to audit folders for duplicates.
+*   **Actions**: Report, Move, Copy, or Delete duplicates.
+*   **Space Recovery**: Calculates potential disk space savings.
 
-After organization completes, you'll see a detailed summary, Example snippet:
-```
-==================================================
-           📊 SUMMARY REPORT
-==================================================
+### Mode 3: Configure Sensitivity
+Adjust the strictness of the duplicate detection algorithm.
+*   **Exact (0-2)**: Detects only identical or near-identical images.
+*   **Standard (5-7)**: Recommended. Handles format changes and minor resizing.
+*   **Aggressive (10+)**: Detects cropped or heavily edited variations.
 
-✅ 1,240 files scanned
-📸 820 images
-🎥 420 videos
+## 📊 Performance & Logging
 
-🗂  Organized into:
-   - 2022/November (340 files)
-   - 2023/May (210 files)
-
-⚠️  34 duplicates detected (skipped)
-
-✨ 1,186 files successfully moved!
-==================================================
-```
-
-## 📂 Project Structure
-
-```
-Clean-Backup/
-├── logs/                   # Log files generated 
-├── src/                    # Source code
-│   ├── __init__.py
-│   ├── constants.py        # Configuration for 
-│   ├── logger.py           # Logging setup
-│   ├── metadata.py         # Metadata extraction 
-│   └── organiser.py        # Core file 
-├── main.py                 # Entry point
-├── requirements.txt        # Python dependencies
-└── README.md               # Documentation
-```
+*   **Comprehensive Reporting**: Generates statistical summaries of operations (Files scanned, duplicates skipped, data moved).
+*   **Audit Logs**: Detailed execution logs stored in `logs/` for debugging and verification.
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Open source contributions are welcome. Please ensure tests are added for new metadata parsers or logic changes.
 
-1. Fork the project
-2. Create your feature branch (`git checkout -b feature/Feature`)
-3. Commit your changes (`git commit -m 'Add some Feature'`)
-4. Push to the branch (`git push origin feature/Feature`)
-5. Open a Pull Request
+1.  Fork the repo.
+2.  Create a feature branch (`git checkout -b feature/NewAlgo`).
+3.  Commit changes.
+4.  Push and create a Pull Request.
 
 ## 📄 License
 
-This project is open source and available under the [MIT License](LICENSE).
+Distributed under the MIT License. See ICENSE` for more information.
+
+---
+*Built by [JayacharanR](https://gthub.com/JayacharanR)*
