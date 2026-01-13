@@ -1,17 +1,48 @@
 from src.organiser import organise_files, print_summary
 from src.duplicate_handler import handle_duplicates, print_duplicate_report
+import src.config
 
 def main():
     source = None
     destination = None
-    while (not source and not destination):
-        print("Clean-Backup: Photo & Video Organizer")
+    current_threshold = src.config.get_threshold()
+    
+    while True:
+        print("\nClean-Backup: Photo & Video Organizer")
         print("-------------------------------------")
         print("\nOptions:")
         print("  [1] Organize files by date")
         print("  [2] Find duplicate images")
+        print("  [3] Configure Duplicate Sensitivity")
+        print("  [Q] Quit")
         
-        mode = input("\nSelect mode (1/2): ").strip()
+        mode = input("\nSelect mode: ").strip().upper()
+        
+        if mode == "Q":
+            break
+            
+        if mode == "3":
+            print(f"==> Current Sensitivity Threshold (Active): {current_threshold}")
+            print("\n--- Duplicate Detection Sensitivity ---")
+            print("1. Exact Matches Only (Safe) -> Threshold: 0 (or 2 for slight compression artifacts)")
+            print("2. Standard (Default) -> Threshold: 5 to 7 (Catches resized images, format changes)")
+            print("3. Aggressive (Loose) -> Threshold: 10+ (Might catch burst photos or very heavy edits)")
+            
+            try:
+                val = int(input("Enter custom Hamming distance threshold: ").strip())
+                if val < 0:
+                    print("❌ Threshold cannot be negative. Setting to 0.")
+                    val = 0
+                elif val > 25:
+                    print("❌ Threshold too high (max 64). Setting to 15.")
+                    val = 15
+                
+                current_threshold = val
+                src.config.save_config("phash_threshold", val)
+                print(f"✅ Sensitivity set to Threshold: {current_threshold} (Saved)")
+            except ValueError:
+                print("❌ Invalid input. Keeping current threshold.")
+            continue
         
         if mode == "2":
             # Duplicate detection only (Rust-powered)
@@ -32,53 +63,59 @@ def main():
                     duplicates_dir = input("Enter destination folder for duplicates: ").strip()
                     if not duplicates_dir:
                         print("❌ Destination folder is required. Aborting.")
-                        return
+                        continue
                 
                 if action == "delete":
                     confirm = input("⚠️  This will DELETE files. Type 'yes' to confirm: ")
                     if confirm.lower() != 'yes':
                         print("Cancelled.")
-                        return
+                        continue
                 
-                print("\n⏳ Scanning for duplicates (using Rust perceptual hashing)...")
-                report = handle_duplicates(source, duplicates_dir=duplicates_dir, action=action)
+                print(f"\n⏳ Scanning for duplicates (Threshold: {current_threshold})...")
+                report = handle_duplicates(source, duplicates_dir=duplicates_dir, action=action, threshold=current_threshold)
                 print_duplicate_report(report)
                 
                 if report.duplicates_moved > 0:
                     action_word = "moved" if action == "move" else "copied" if action == "copy" else "deleted"
                     print(f"✅ {report.duplicates_moved} duplicate files {action_word}")
-            return
+            # Loop back to menu instead of returning? 
+            # Original code returned. I'll continue loop for better UX.
+            continue
         
-        source = input("Enter source folder path: ")
-        destination = input("Enter destination folder path: ")
-        
-        if source and destination:
-            # Ask user for move or copy preference
-            print("\nChoose operation:")
-            print("  [M] Move files (removes from source)")
-            print("  [C] Copy files (keeps originals)")
-            choice = None
-            while(choice!='C' and choice!='M'):
-                choice=input("Enter choice (M/C): ").strip().upper()
+        if mode == "1":
+            source = input("Enter source folder path: ")
+            destination = input("Enter destination folder path: ")
+            
+            if source and destination:
+                # Ask user for move or copy preference
+                print("\nChoose operation:")
+                print("  [M] Move files (removes from source)")
+                print("  [C] Copy files (keeps originals)")
+                choice = None
+                while(choice!='C' and choice!='M'):
+                    choice=input("Enter choice (M/C): ").strip().upper()
+                    
+                    if choice == 'C':
+                        operation = 'copy'
+                    else:
+                        operation = 'move'
                 
-                if choice == 'C':
-                    operation = 'copy'
-                else:
-                    operation = 'move'
+                # Ask about duplicate detection
+                check_dups = input("\nCheck for perceptual duplicates before organizing? (y/n): ").strip().lower()
+                check_duplicates = (check_dups == 'y')
+                
+                if check_duplicates:
+                    print(f"  Using Rust perceptual hashing to detect duplicate images (Threshold: {current_threshold})")
+                
+                stats = organise_files(source, destination, operation, check_duplicates=check_duplicates, duplicate_threshold=current_threshold)
+                print_summary(stats, operation)
+                
+                print("Check logs for detailed information!")
+            else:
+                print("Source and Destination paths are required.")
+            continue
             
-            # Ask about duplicate detection
-            check_dups = input("\nCheck for perceptual duplicates before organizing? (y/n): ").strip().lower()
-            check_duplicates = (check_dups == 'y')
-            
-            if check_duplicates:
-                print("  Using Rust perceptual hashing to detect duplicate images")
-            
-            stats = organise_files(source, destination, operation, check_duplicates=check_duplicates)
-            print_summary(stats, operation)
-            
-            print("Check logs for detailed information!")
-        else:
-            print("Source and Destination paths are required.")
+        print("Invalid option. Please try again.")
 
 if __name__ == "__main__":
     main()
