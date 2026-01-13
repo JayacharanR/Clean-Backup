@@ -102,7 +102,7 @@ Open source contributions are welcome. Please ensure tests are added for new met
 
 ## 📄 License
 
-Distributed under the MIT License. See ICENSE` for more information.
+Distributed under the MIT License. See `LICENSE` for more information.
 
 ---
-*Built by [JayacharanR](https://gthub.com/JayacharanR)*
+*Built by [JayacharanR](https://github.com/JayacharanR)*
