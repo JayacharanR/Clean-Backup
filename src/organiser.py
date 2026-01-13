@@ -4,7 +4,7 @@ from collections import defaultdict
 from src import constants
 from src.metadata import get_image_date, get_video_date, get_file_modification_date
 from src.logger import logger
-from src.phash import find_duplicates, is_rust_available, THRESHOLD_SIMILAR
+from src.phash import find_duplicates, find_duplicates_from_paths, is_rust_available, THRESHOLD_SIMILAR
 
 def organise_files(src_dir, dest_dir, operation='move', check_duplicates=False, duplicate_threshold=THRESHOLD_SIMILAR):
     """
@@ -37,17 +37,48 @@ def organise_files(src_dir, dest_dir, operation='move', check_duplicates=False, 
     duplicate_files = set()  # Files to skip due to perceptual duplication
     if check_duplicates:
         logger.info(f"Scanning for perceptual duplicates using {'Rust (phash_rs)' if is_rust_available() else 'Python fallback'}...")
-        duplicate_groups = find_duplicates(str(src_path), threshold=duplicate_threshold)
+        
+        # Collect source images
+        src_images = []
+        for p in src_path.rglob('*'):
+            if p.is_file() and p.suffix.lower() in constants.IMAGE_EXTENSIONS:
+                src_images.append(str(p.resolve()))
+
+        # Collect destination images to check against
+        dest_images_set = set()
+        all_images = list(src_images)
+        
+        if dest_path.exists():
+            logger.info("Including destination folder in duplicate scan...")
+            for p in dest_path.rglob('*'):
+                if p.is_file() and p.suffix.lower() in constants.IMAGE_EXTENSIONS:
+                    abs_path = str(p.resolve())
+                    all_images.append(abs_path)
+                    dest_images_set.add(abs_path)
+        
+        duplicate_groups = find_duplicates_from_paths(all_images, threshold=duplicate_threshold)
         
         if duplicate_groups:
             logger.info(f"Found {len(duplicate_groups)} duplicate groups")
             for group in duplicate_groups:
-                # Mark all duplicates except the best one
-                for dup_path in group.duplicates:
-                    # Use absolute path for consistent comparison
-                    duplicate_files.add(Path(dup_path).resolve())
-                    stats['perceptual_duplicates'] += 1
-                logger.info(f"Duplicate group: keeping {group.best}, skipping {len(group.duplicates)} duplicates")
+                # Check if group has any file in destination
+                group_has_dest = any(p in dest_images_set for p in group.paths)
+                
+                if group_has_dest:
+                    # If duplicate exists in destination, skip ALL source files in this group
+                    # (We assume destination files are preferred)
+                    for path in group.paths:
+                        if path not in dest_images_set:
+                            duplicate_files.add(Path(path).resolve())
+                            stats['perceptual_duplicates'] += 1
+                    logger.info(f"Duplicate group found in destination: skipping source files")
+                else:
+                    # Mark all duplicates except the best one (source-only group)
+                    for dup_path in group.duplicates:
+                        # Use absolute path for consistent comparison
+                        duplicate_files.add(Path(dup_path).resolve())
+                        stats['perceptual_duplicates'] += 1
+                    logger.info(f"Duplicate group: keeping {group.best}, skipping {len(group.duplicates)} duplicates")
         else:
             logger.info("No perceptual duplicates found")
     

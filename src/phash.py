@@ -167,7 +167,29 @@ def find_duplicates(
     
     if not image_paths:
         return []
+        
+    return find_duplicates_from_paths(image_paths, threshold, algorithm)
+
+
+def find_duplicates_from_paths(
+    image_paths: List[str],
+    threshold: int = THRESHOLD_SIMILAR,
+    algorithm: HashAlgorithm = "phash"
+) -> List[DuplicateGroup]:
+    """
+    Find duplicates within a provided list of image paths.
     
+    Args:
+        image_paths: List of absolute paths to images
+        threshold: Maximum Hamming distance
+        algorithm: Hash algorithm
+        
+    Returns:
+        List of DuplicateGroup objects
+    """
+    if not image_paths:
+        return []
+
     # Find duplicates
     if _USE_RUST:
         try:
