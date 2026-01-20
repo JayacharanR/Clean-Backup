@@ -10,6 +10,7 @@ wheels/
 .venv
 
 #omit
+**/target/
 todo.md
 explanation.md
 logs
