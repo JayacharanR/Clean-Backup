@@ -5,6 +5,7 @@ from src import constants
 from src.metadata import get_image_date, get_video_date, get_file_modification_date
 from src.logger import logger
 from src.phash import find_duplicates, find_duplicates_from_paths, is_rust_available, THRESHOLD_SIMILAR
+from src.undo_manager import undo_manager
 
 def organise_files(src_dir, dest_dir, operation='move', check_duplicates=False, duplicate_threshold=THRESHOLD_SIMILAR):
     """
@@ -20,6 +21,8 @@ def organise_files(src_dir, dest_dir, operation='move', check_duplicates=False, 
     src_path = Path(src_dir)
     dest_path = Path(dest_dir)
     
+    undo_manager.start_session()
+
     # Statistics tracking
     stats = {
         'total_scanned': 0,
@@ -138,15 +141,18 @@ def organise_files(src_dir, dest_dir, operation='move', check_duplicates=False, 
                     if operation == 'copy':
                         shutil.copy2(str(file_path), str(target_file))
                         logger.info(f"Copied: {file_path.name} -> {target_folder}")
+                        undo_manager.log_action('copy', file_path, target_file)
                     else:
                         shutil.move(str(file_path), str(target_file))
                         logger.info(f"Moved: {file_path.name} -> {target_folder}")
+                        undo_manager.log_action('move', file_path, target_file)
                     stats['processed'] += 1
                     stats['folders_created'][folder_key] += 1
                 except Exception as e:
                     stats['errors'] += 1
                     logger.error(f"Error {operation}ing {file_path.name}: {e}")
     
+    undo_manager.end_session()
     return stats
 
 

@@ -18,6 +18,7 @@ from src.phash import (
     THRESHOLD_VERY_SIMILAR
 )
 from src.logger import logger
+from src.undo_manager import undo_manager
 
 
 @dataclass
@@ -91,6 +92,8 @@ def handle_duplicates(
     """
     source_path = Path(source_dir)
     
+    undo_manager.start_session()
+
     # Find duplicates
     groups = scan_for_duplicates(source_dir, threshold, algorithm)
     
@@ -143,9 +146,11 @@ def handle_duplicates(
                     if action == "move":
                         shutil.move(dup, str(target))
                         logger.info(f"Moved duplicate: {dup} -> {target}")
+                        undo_manager.log_action('move', dup, target)
                     else:  # copy
                         shutil.copy2(dup, str(target))
                         logger.info(f"Copied duplicate: {dup} -> {target}")
+                        undo_manager.log_action('copy', dup, target)
                     report.duplicates_moved += 1
                 except Exception as e:
                     logger.error(f"Error {action}ing {dup}: {e}")
@@ -162,6 +167,7 @@ def handle_duplicates(
                     logger.error(f"Error deleting {dup}: {e}")
                     report.errors += 1
     
+    undo_manager.end_session()
     return report
 
 

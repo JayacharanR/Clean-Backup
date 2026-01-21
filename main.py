@@ -1,5 +1,6 @@
 from src.organiser import organise_files, print_summary
 from src.duplicate_handler import handle_duplicates, print_duplicate_report
+from src.undo_manager import undo_manager
 import src.config
 
 def main():
@@ -14,6 +15,7 @@ def main():
         print("  [1] Organize files by date")
         print("  [2] Find duplicate images")
         print("  [3] Configure Duplicate Sensitivity")
+        print("  [4] Undo Last Operation")
         print("  [Q] Quit")
         
         mode = input("\nSelect mode: ").strip().upper()
@@ -21,6 +23,36 @@ def main():
         if mode == "Q":
             break
             
+        if mode == "4":
+             print("\n--- Undo / Rollback ---")
+             sessions = undo_manager.list_sessions()
+             if not sessions:
+                 print("No undo history found.")
+                 continue
+                 
+             print("Available sessions:")
+             for i, sess in enumerate(sessions):
+                 print(f"  [{i+1}] Session {sess['id']} ({sess['count']} actions)")
+             
+             choice = input("\nSelect session to revert (or 'L' for Latest): ").strip().upper()
+             
+             target_session = None
+             if choice == 'L' or choice == '':
+                 target_session = sessions[0]
+             elif choice.isdigit():
+                 idx = int(choice) - 1
+                 if 0 <= idx < len(sessions):
+                     target_session = sessions[idx]
+             
+             if target_session:
+                 confirm = input(f"Are you sure you want to revert {target_session['count']} actions from {target_session['id']}? (y/n): ")
+                 if confirm.lower() == 'y':
+                     undo_manager.undo_session(target_session['path'])
+             else:
+                 print("Invalid selection.")
+             
+             continue
+
         if mode == "3":
             print(f"==> Current Sensitivity Threshold (Active): {current_threshold}")
             print("\n--- Duplicate Detection Sensitivity ---")
