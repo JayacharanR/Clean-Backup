@@ -26,11 +26,17 @@ Core engineering highlights include a **hybrid architecture** where performance-
 *   **Tunable Sensitivity**: User-configurable Hamming distance threshold allows fine-tuning between "Exact Match" (strict) and "Visual Similarity" (loose/aggressive) modes.
 *   **Persistent Configuration**: Settings are serialized and persisted between sessions.
 
+### ↩️ Transactional Undo/Rollback
+*   **Safety First**: Every file operation (Move/Copy) is logged in a persistent "Journal" transaction file.
+*   **Session-Based Revert**: Allows full rollback of previous sessions, returning files to their original sources and effectively handling directory cleanup.
+*   **Crash Recovery**: Journals are written immediately, ensuring "Undo" capability persists even after program restart.
+
 ## 🛠️ Architecture
 
 The project follows a modular architecture:
 
 *   **`src/organiser.py`**: Core logic for file system operations and metadata parsing.
+*   **`src/undo_manager.py`**: Handles transaction logging and rollback logic.
 *   **`src/duplicate_handler.py`**: Manages duplicate detection workflows and reporting.
 *   **`src/phash.py`**: Bridge interface between Python and the underlying Rust engine.
 *   **`phash_rs/`**: Rust crate providing high-performance implementation of perceptual hashing algorithms (DHash/pHash).
@@ -85,6 +91,11 @@ Adjust the strictness of the duplicate detection algorithm.
 *   **Exact (0-2)**: Detects only identical or near-identical images.
 *   **Standard (5-7)**: Recommended. Handles format changes and minor resizing.
 *   **Aggressive (10+)**: Detects cropped or heavily edited variations.
+
+### Mode 4: Undo Last Operation
+A safety net for accidental operations.
+*   **Lists Recent Sessions**: Shows a history of organization or deduplication runs.
+*   **Rollback**: Moves files back to their original locations and cleans up empty year/month folders created by the tool.
 
 ## 📊 Performance & Logging
 
