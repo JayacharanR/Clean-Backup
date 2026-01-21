@@ -44,6 +44,22 @@ class UndoManager:
         # Write to disk immediately for crash safety (append mode would be better in production, but JSON list is simple)
         self._save_journal()
 
+    def _cleanup_empty_dirs(self, directory):
+        """Recursively delete empty directories up the tree."""
+        path = Path(directory)
+        try:
+            # Stop if we reach root or get a permission error
+            while path.is_dir() and path != path.parent:  
+                if not any(path.iterdir()):
+                    path.rmdir()
+                    logger.info(f"Cleanup: Deleted empty directory {path}")
+                    path = path.parent
+                else:
+                    break
+        except Exception as e:
+            # Stops bubbling up if duplicate_handler or other process is using the dir, or permission denied
+            pass
+
     def _save_journal(self):
         try:
             with open(self.journal_path, 'w') as f:
@@ -109,6 +125,9 @@ class UndoManager:
                         shutil.move(dst, src)
                         logger.info(f"Undo Move: {dst} -> {src}")
                         success_count += 1
+                        
+                        # Cleanup empty directories at destination
+                        self._cleanup_empty_dirs(os.path.dirname(dst))
                     else:
                         logger.warning(f"Undo failed: File not found at {dst}")
                         fail_count += 1
@@ -119,6 +138,9 @@ class UndoManager:
                         os.remove(dst)
                         logger.info(f"Undo Copy: Deleted {dst}")
                         success_count += 1
+                        
+                        # Cleanup empty directories at destination
+                        self._cleanup_empty_dirs(os.path.dirname(dst))
                     else:
                         logger.warning(f"Undo failed: File not found at {dst}")
                         fail_count += 1
