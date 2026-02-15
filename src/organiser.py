@@ -1,4 +1,5 @@
 import shutil
+import re
 from pathlib import Path
 from collections import defaultdict
 from src import constants
@@ -7,7 +8,85 @@ from src.logger import logger
 from src.phash import find_duplicates, find_duplicates_from_paths, is_rust_available, THRESHOLD_SIMILAR
 from src.undo_manager import undo_manager
 
-def organise_files(src_dir, dest_dir, operation='move', check_duplicates=False, duplicate_threshold=THRESHOLD_SIMILAR):
+def detect_name_based_duplicates(file_paths):
+    """
+    Detect duplicate files based on common naming patterns from various OS.
+    
+    Patterns detected:
+    - Windows (Download): photo (1).jpg, photo (2).jpg
+    - Generic: photo-1.jpg, photo_1.jpg
+    - macOS (Duplicate): photo copy.jpg, photoCopy.jpg
+    - Windows (Copy): Notes - Copy.txt
+    - Linux (Nautilus): Data (copy).csv
+    - macOS (Drag/Drop): Image 2.png, Image 3.png
+    
+    Args:
+        file_paths: List of Path objects
+        
+    Returns:
+        set: Paths that should be considered duplicates (keeps original without suffix)
+    """
+    duplicate_files = set()
+    base_name_groups = defaultdict(list)
+    
+    # Regex patterns to detect duplicate suffixes (order matters - most specific first)
+    patterns = [
+        r'\s*\((\d+)\)$',                          # (1), (2) - Windows/Android/iOS downloads
+        r'\s*\(copy\)$',                           # (copy) - Linux Nautilus
+        r'\s*-\s*Copy(\d*)$',                      # - Copy, - Copy2 - Windows
+        r'\s+copy(\d*)$',                          # copy, copy2 - macOS (space before)
+        r'[-_]copy(\d*)$',                         # -copy, _copy - generic
+        r'[-_]Copy(\d*)$',                         # -Copy, _Copy - generic
+        r'[-_]COPY(\d*)$',                         # -COPY, _COPY - generic  
+        r'[-_](\d+)$',                             # -1, _1 - generic
+        r'\s+(\d+)$',                              # (space)2, (space)3 - macOS drag/drop
+    ]
+    
+    # Examples of matched patterns:
+    # "Installer (1).exe" → base: "Installer.exe"
+    # "Data (copy).csv" → base: "Data.csv"
+    # "Notes - Copy.txt" → base: "Notes.txt"
+    # "Image copy.png" → base: "Image.png"
+    # "Photo_1.jpg" → base: "Photo.jpg"
+    # "Image 2.png" → base: "Image.png"
+    
+    for file_path in file_paths:
+        if not file_path.is_file():
+            continue
+            
+        stem = file_path.stem  # filename without extension
+        suffix = file_path.suffix
+        
+        # Try to extract base name by removing duplicate suffixes
+        base_name = stem
+        is_duplicate = False
+        
+        for pattern in patterns:
+            match = re.search(pattern, stem, re.IGNORECASE)
+            if match:
+                # Remove the duplicate suffix to get base name
+                base_name = re.sub(pattern, '', stem, flags=re.IGNORECASE)
+                is_duplicate = True
+                break
+        
+        # Group files by base name + extension
+        key = f"{base_name}{suffix}".lower()
+        base_name_groups[key].append((file_path, is_duplicate, stem))
+    
+    # Analyze groups to find duplicates
+    for base_key, files in base_name_groups.items():
+        if len(files) > 1:
+            # Sort: originals (no suffix) first, then by name
+            files.sort(key=lambda x: (x[1], x[2]))  # (is_duplicate, stem)
+            
+            # Keep the first file (original without suffix), mark rest as duplicates
+            for file_path, is_dup, stem in files[1:]:
+                duplicate_files.add(file_path)
+                logger.info(f"Name-based duplicate detected: {file_path.name} (base: {base_key})")
+    
+    return duplicate_files
+
+def organise_files(src_dir, dest_dir, operation='move', check_duplicates=False, duplicate_threshold=THRESHOLD_SIMILAR, check_name_duplicates=False):
     """
     Organize media files into year/month folders.
     
@@ -15,8 +94,9 @@ def organise_files(src_dir, dest_dir, operation='move', check_duplicates=False, 
         src_dir: Source directory
         dest_dir: Destination directory
         operation: 'move' or 'copy'
-        check_duplicates: If True, detect and skip duplicate images before organizing
+        check_duplicates: If True, detect and skip duplicate images before organizing (perceptual hashing)
         duplicate_threshold: Hamming distance threshold for duplicate detection
+        check_name_duplicates: If True, detect and skip files with duplicate naming patterns (e.g., photo(1).jpg)
     """
     src_path = Path(src_dir)
     dest_path = Path(dest_dir)
@@ -31,10 +111,20 @@ def organise_files(src_dir, dest_dir, operation='move', check_duplicates=False, 
         'other': 0,
         'duplicates': 0,
         'perceptual_duplicates': 0,
+        'name_duplicates': 0,
         'processed': 0,
         'errors': 0,
         'folders_created': defaultdict(int)  # {"2022/November": count}
     }
+    
+    # Name-based duplicate detection (if enabled)
+    name_duplicate_files = set()
+    if check_name_duplicates:
+        logger.info("Scanning for name-based duplicates (e.g., photo(1).jpg)...")
+        all_files = list(src_path.rglob('*'))
+        name_duplicate_files = detect_name_based_duplicates(all_files)
+        stats['name_duplicates'] = len(name_duplicate_files)
+        logger.info(f"Found {len(name_duplicate_files)} name-based duplicates")
     
     # Perceptual duplicate detection (if enabled)
     duplicate_files = set()  # Files to skip due to perceptual duplication
@@ -88,6 +178,11 @@ def organise_files(src_dir, dest_dir, operation='move', check_duplicates=False, 
     for file_path in src_path.rglob('*'):  # recursive glob search 
         if file_path.is_file():
             stats['total_scanned'] += 1
+            
+            # Skip name-based duplicates
+            if check_name_duplicates and file_path in name_duplicate_files:
+                logger.info(f"Skipping name-based duplicate: {file_path.name}")
+                continue
             
             # Skip perceptual duplicates (use absolute path for comparison)
             if check_duplicates and file_path.resolve() in duplicate_files:
@@ -187,7 +282,11 @@ def print_summary(stats, operation='move'):
     
     # Show duplicates warning
     if stats['duplicates'] > 0:
-        print(f"\n⚠️  {duplicates} name-based duplicates detected (skipped)")
+        print(f"\n⚠️  {duplicates} exact filename duplicates detected (skipped)")
+    
+    # Show name-based duplicates
+    if stats.get('name_duplicates', 0) > 0:
+        print(f"📝 {stats['name_duplicates']:,} OS duplicate patterns detected (Windows/macOS/Linux)")
     
     # Show perceptual duplicates
     if stats.get('perceptual_duplicates', 0) > 0:

@@ -136,10 +136,16 @@ def main():
                 check_dups = input("\nCheck for perceptual duplicates before organizing? (y/n): ").strip().lower()
                 check_duplicates = (check_dups == 'y')
                 
+                check_name_dups = input("Check for name-based duplicates (e.g., photo(1).jpg, Image copy.png)? (y/n): ").strip().lower()
+                check_name_duplicates = (check_name_dups == 'y')
+                
                 if check_duplicates:
                     print(f"  Using Rust perceptual hashing to detect duplicate images (Threshold: {current_threshold})")
                 
-                stats = organise_files(source, destination, operation, check_duplicates=check_duplicates, duplicate_threshold=current_threshold)
+                if check_name_duplicates:
+                    print(f"  Detecting OS duplicate patterns: (1), (copy), - Copy, copy, drag/drop numbers")
+                
+                stats = organise_files(source, destination, operation, check_duplicates=check_duplicates, duplicate_threshold=current_threshold, check_name_duplicates=check_name_duplicates)
                 print_summary(stats, operation)
                 
                 print("Check logs for detailed information!")
