@@ -33,10 +33,6 @@ except ImportError:
     logger.warning("Rust phash_rs not found, using pure Python fallback (slower)")
     _phash = None
 
-
-# Algorithm type hint
-HashAlgorithm = Literal["ahash", "dhash", "phash"]
-
 # Recommended thresholds
 THRESHOLD_IDENTICAL = 0
 THRESHOLD_VERY_SIMILAR = 5
@@ -62,15 +58,13 @@ class DuplicateGroup:
 
 def compute_hash(
     path: str,
-    algorithm: HashAlgorithm = "phash",
     hash_size: int = 8
 ) -> Optional[str]:
     """
-    Compute perceptual hash of an image.
+    Compute perceptual hash (pHash) of an image using DCT.
     
     Args:
         path: Path to the image file
-        algorithm: Hash algorithm ("ahash", "dhash", or "phash")
         hash_size: Size of hash (default 8 = 64-bit hash)
     
     Returns:
@@ -78,12 +72,12 @@ def compute_hash(
     """
     if _USE_RUST:
         try:
-            return _phash.compute_hash(path, algorithm, hash_size)
+            return _phash.compute_hash(path, hash_size)
         except Exception as e:
             logger.debug(f"Failed to hash {path}: {e}")
             return None
     else:
-        return _python_compute_hash(path, algorithm, hash_size)
+        return _python_compute_hash(path, hash_size)
 
 
 def hamming_distance(hash1: str, hash2: str) -> int:
@@ -106,29 +100,27 @@ def hamming_distance(hash1: str, hash2: str) -> int:
 def are_similar(
     path1: str,
     path2: str,
-    threshold: int = THRESHOLD_SIMILAR,
-    algorithm: HashAlgorithm = "phash"
+    threshold: int = THRESHOLD_SIMILAR
 ) -> bool:
     """
-    Check if two images are perceptually similar.
+    Check if two images are perceptually similar using pHash.
     
     Args:
         path1: Path to first image
         path2: Path to second image
         threshold: Maximum Hamming distance for similarity
-        algorithm: Hash algorithm to use
     
     Returns:
         True if images are similar
     """
     if _USE_RUST:
         try:
-            return _phash.are_similar(path1, path2, threshold, algorithm)
+            return _phash.are_similar(path1, path2, threshold)
         except Exception:
             return False
     else:
-        h1 = compute_hash(path1, algorithm)
-        h2 = compute_hash(path2, algorithm)
+        h1 = compute_hash(path1)
+        h2 = compute_hash(path2)
         if h1 is None or h2 is None:
             return False
         return hamming_distance(h1, h2) <= threshold
@@ -137,16 +129,14 @@ def are_similar(
 def find_duplicates(
     source: str,
     threshold: int = THRESHOLD_SIMILAR,
-    algorithm: HashAlgorithm = "phash",
     extensions: Optional[set] = None
 ) -> List[DuplicateGroup]:
     """
-    Find duplicate images in a directory.
+    Find duplicate images in a directory using pHash.
     
     Args:
         source: Directory path to scan
         threshold: Maximum Hamming distance for duplicates
-        algorithm: Hash algorithm to use
         extensions: File extensions to include (default: IMAGE_EXTENSIONS)
     
     Returns:
@@ -168,21 +158,19 @@ def find_duplicates(
     if not image_paths:
         return []
         
-    return find_duplicates_from_paths(image_paths, threshold, algorithm)
+    return find_duplicates_from_paths(image_paths, threshold)
 
 
 def find_duplicates_from_paths(
     image_paths: List[str],
-    threshold: int = THRESHOLD_SIMILAR,
-    algorithm: HashAlgorithm = "phash"
+    threshold: int = THRESHOLD_SIMILAR
 ) -> List[DuplicateGroup]:
     """
-    Find duplicates within a provided list of image paths.
+    Find duplicates within a provided list of image paths using pHash.
     
     Args:
         image_paths: List of absolute paths to images
         threshold: Maximum Hamming distance
-        algorithm: Hash algorithm
         
     Returns:
         List of DuplicateGroup objects
@@ -193,7 +181,7 @@ def find_duplicates_from_paths(
     # Find duplicates
     if _USE_RUST:
         try:
-            raw_groups = _phash.find_duplicate_images(image_paths, threshold, algorithm)
+            raw_groups = _phash.find_duplicate_images(image_paths, threshold)
             return [
                 DuplicateGroup(
                     paths=g["paths"],
@@ -206,19 +194,17 @@ def find_duplicates_from_paths(
             logger.error(f"Rust duplicate detection failed: {e}")
             logger.info("Falling back to Python implementation")
     
-    return _python_find_duplicates(image_paths, threshold, algorithm)
+    return _python_find_duplicates(image_paths, threshold)
 
 
 def compute_hashes_batch(
-    paths: List[str],
-    algorithm: HashAlgorithm = "phash"
+    paths: List[str]
 ) -> Dict[str, str]:
     """
-    Compute hashes for multiple images (parallel if Rust available).
+    Compute pHashes for multiple images (parallel if Rust available).
     
     Args:
         paths: List of image paths
-        algorithm: Hash algorithm to use
     
     Returns:
         Dictionary mapping paths to their hashes
@@ -244,53 +230,17 @@ def compute_hashes_batch(
 
 def _python_compute_hash(
     path: str,
-    algorithm: str,
     hash_size: int = 8
 ) -> Optional[str]:
-    """Pure Python hash computation (fallback)."""
+    """Pure Python pHash computation (fallback)."""
     try:
         from PIL import Image
         
         img = Image.open(path).convert('L')  # Grayscale
-        
-        if algorithm == "ahash":
-            return _python_ahash(img, hash_size)
-        elif algorithm == "dhash":
-            return _python_dhash(img, hash_size)
-        else:  # phash
-            return _python_phash(img, hash_size)
+        return _python_phash(img, hash_size)
     except Exception as e:
         logger.debug(f"Python hash failed for {path}: {e}")
         return None
-
-
-def _python_ahash(img, hash_size: int) -> str:
-    """Average hash - compare pixels to mean."""
-    from PIL import Image
-    
-    img = img.resize((hash_size, hash_size), Image.Resampling.LANCZOS)
-    pixels = list(img.getdata())
-    avg = sum(pixels) / len(pixels)
-    
-    bits = ''.join('1' if p > avg else '0' for p in pixels)
-    return _bits_to_hex(bits)
-
-
-def _python_dhash(img, hash_size: int) -> str:
-    """Difference hash - compare adjacent pixels."""
-    from PIL import Image
-    
-    img = img.resize((hash_size + 1, hash_size), Image.Resampling.LANCZOS)
-    pixels = list(img.getdata())
-    
-    bits = []
-    for y in range(hash_size):
-        for x in range(hash_size):
-            left = pixels[y * (hash_size + 1) + x]
-            right = pixels[y * (hash_size + 1) + x + 1]
-            bits.append('1' if left > right else '0')
-    
-    return _bits_to_hex(''.join(bits))
 
 
 def _python_phash(img, hash_size: int) -> str:
@@ -373,8 +323,7 @@ def _python_hamming_distance(hash1: str, hash2: str) -> int:
 
 def _python_find_duplicates(
     paths: List[str],
-    threshold: int,
-    algorithm: str
+    threshold: int
 ) -> List[DuplicateGroup]:
     """Pure Python duplicate finder (fallback)."""
     from PIL import Image
@@ -382,7 +331,7 @@ def _python_find_duplicates(
     # Compute hashes
     image_data = []
     for path in paths:
-        h = _python_compute_hash(path, algorithm)
+        h = _python_compute_hash(path)
         if h:
             try:
                 with Image.open(path) as img:

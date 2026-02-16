@@ -35,24 +35,22 @@ class DuplicateReport:
 
 def scan_for_duplicates(
     source_dir: str,
-    threshold: int = THRESHOLD_SIMILAR,
-    algorithm: Literal["ahash", "dhash", "phash"] = "phash"
+    threshold: int = THRESHOLD_SIMILAR
 ) -> List[DuplicateGroup]:
     """
-    Scan a directory for duplicate images.
+    Scan a directory for duplicate images using pHash.
     
     Args:
         source_dir: Directory to scan
         threshold: Hamming distance threshold (lower = stricter)
-        algorithm: Hash algorithm to use
     
     Returns:
         List of DuplicateGroup objects
     """
     logger.info(f"Scanning for duplicates using {get_backend()}")
-    logger.info(f"Algorithm: {algorithm}, Threshold: {threshold}")
+    logger.info(f"Threshold: {threshold}")
     
-    duplicates = find_duplicates(source_dir, threshold, algorithm)
+    duplicates = find_duplicates(source_dir, threshold)
     
     if duplicates:
         logger.info(f"Found {len(duplicates)} duplicate groups")
@@ -69,11 +67,10 @@ def handle_duplicates(
     duplicates_dir: Optional[str] = None,
     action: Literal["move", "copy", "delete", "report"] = "report",
     threshold: int = THRESHOLD_SIMILAR,
-    algorithm: Literal["ahash", "dhash", "phash"] = "phash",
     keep_best: bool = True
 ) -> DuplicateReport:
     """
-    Scan for and handle duplicate images.
+    Scan for and handle duplicate images using pHash.
     
     Args:
         source_dir: Directory to scan for duplicates
@@ -84,7 +81,6 @@ def handle_duplicates(
             - "copy": Copy duplicates to duplicates_dir (keeps originals)
             - "delete": Delete duplicate files (keeps best)
         threshold: Hamming distance threshold
-        algorithm: Hash algorithm
         keep_best: If True, keep the highest resolution version
     
     Returns:
@@ -95,7 +91,7 @@ def handle_duplicates(
     undo_manager.start_session()
 
     # Find duplicates
-    groups = scan_for_duplicates(source_dir, threshold, algorithm)
+    groups = scan_for_duplicates(source_dir, threshold)
     
     # Calculate statistics
     total_scanned = sum(len(list(source_path.rglob(f'*{ext}'))) 

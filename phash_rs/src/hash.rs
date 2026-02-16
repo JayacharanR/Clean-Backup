@@ -1,20 +1,14 @@
-//! Perceptual Hash Implementation
+//! Perceptual Hash Implementation (pHash)
 //! 
-//! Implements three hash algorithms:
-//! - aHash (Average Hash): Compare each pixel to the mean
-//! - dHash (Difference Hash): Compare adjacent pixels
-//! - pHash (Perceptual Hash): Uses DCT for robustness
+//! Implements DCT-based perceptual hashing for robust duplicate detection
+//! that is resistant to resizing, format changes, and minor edits.
 
 use image::{DynamicImage, imageops::FilterType};
 use std::path::Path;
 
-/// Hash algorithm types
+/// Hash algorithm type (only pHash supported)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HashAlgorithm {
-    /// Average Hash - fast, good for exact duplicates
-    AHash,
-    /// Difference Hash - good balance of speed and accuracy
-    DHash,
     /// Perceptual Hash - most robust, uses DCT
     PHash,
 }
@@ -38,13 +32,9 @@ impl ImageHash {
         Ok(Self::from_image(&img, algorithm, hash_size))
     }
     
-    /// Compute hash from a loaded image
-    pub fn from_image(img: &DynamicImage, algorithm: HashAlgorithm, hash_size: usize) -> Self {
-        match algorithm {
-            HashAlgorithm::AHash => Self::compute_ahash(img, hash_size),
-            HashAlgorithm::DHash => Self::compute_dhash(img, hash_size),
-            HashAlgorithm::PHash => Self::compute_phash(img, hash_size),
-        }
+    /// Compute hash from a loaded image (uses pHash)
+    pub fn from_image(img: &DynamicImage, _algorithm: HashAlgorithm, hash_size: usize) -> Self {
+        Self::compute_phash(img, hash_size)
     }
     
     /// Parse hash from hex string
@@ -77,63 +67,6 @@ impl ImageHash {
             .zip(other.bits.iter())
             .map(|(a, b)| (a ^ b).count_ones())
             .sum()
-    }
-    
-    /// Average Hash (aHash)
-    /// 
-    /// 1. Reduce to small grayscale image
-    /// 2. Compute mean pixel value
-    /// 3. Each bit = 1 if pixel > mean, else 0
-    fn compute_ahash(img: &DynamicImage, hash_size: usize) -> Self {
-        let gray = img.grayscale();
-        let resized = gray.resize_exact(
-            hash_size as u32,
-            hash_size as u32,
-            FilterType::Lanczos3,
-        );
-        
-        // Get all pixel values
-        let pixels: Vec<u8> = resized
-            .to_luma8()
-            .pixels()
-            .map(|p| p.0[0])
-            .collect();
-        
-        // Compute mean
-        let mean: f64 = pixels.iter().map(|&p| p as f64).sum::<f64>() / pixels.len() as f64;
-        
-        // Generate hash bits
-        let bits = Self::pixels_to_bits(&pixels, |p| p as f64 > mean);
-        
-        Self { bits, size: hash_size }
-    }
-    
-    /// Difference Hash (dHash)
-    /// 
-    /// 1. Reduce to (hash_size+1) x hash_size grayscale
-    /// 2. Compare each pixel to its right neighbor
-    /// 3. bit = 1 if left > right, else 0
-    fn compute_dhash(img: &DynamicImage, hash_size: usize) -> Self {
-        let gray = img.grayscale();
-        let resized = gray.resize_exact(
-            (hash_size + 1) as u32,
-            hash_size as u32,
-            FilterType::Lanczos3,
-        );
-        
-        let luma = resized.to_luma8();
-        let mut hash_bits = Vec::new();
-        
-        for y in 0..hash_size {
-            for x in 0..hash_size {
-                let left = luma.get_pixel(x as u32, y as u32).0[0];
-                let right = luma.get_pixel((x + 1) as u32, y as u32).0[0];
-                hash_bits.push(left > right);
-            }
-        }
-        
-        let bits = Self::bools_to_bytes(&hash_bits);
-        Self { bits, size: hash_size }
     }
     
     /// Perceptual Hash (pHash)
@@ -237,15 +170,6 @@ impl ImageHash {
         }
         
         result
-    }
-    
-    /// Convert pixel values to hash bits using a predicate
-    fn pixels_to_bits<F>(pixels: &[u8], predicate: F) -> Vec<u8>
-    where
-        F: Fn(u8) -> bool,
-    {
-        let bools: Vec<bool> = pixels.iter().map(|&p| predicate(p)).collect();
-        Self::bools_to_bytes(&bools)
     }
     
     /// Convert boolean slice to packed bytes

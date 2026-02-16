@@ -1,15 +1,12 @@
 //! Perceptual Image Hashing Library
 //! 
-//! This library provides fast perceptual hashing algorithms for detecting
+//! This library provides fast perceptual hashing (pHash) for detecting
 //! visually similar or duplicate images, even when they differ in:
 //! - Resolution
 //! - Format (JPG, PNG, etc.)
 //! - Minor edits or compression artifacts
 //! 
-//! Supported algorithms:
-//! - aHash (Average Hash): Fast, good for identical images
-//! - dHash (Difference Hash): Good for detecting similar images
-//! - pHash (Perceptual Hash): Most robust, uses DCT
+//! Uses DCT-based perceptual hashing for robustness.
 
 mod hash;
 mod duplicate;
@@ -21,28 +18,18 @@ use std::collections::HashMap;
 pub use hash::{ImageHash, HashAlgorithm};
 pub use duplicate::{DuplicateGroup, find_duplicates, find_duplicates_parallel};
 
-/// Compute the perceptual hash of an image file.
+/// Compute the perceptual hash (pHash) of an image file.
 /// 
 /// Args:
 ///     path: Path to the image file
-///     algorithm: Hash algorithm - "ahash", "dhash", or "phash" (default: "phash")
 ///     hash_size: Size of the hash (default: 8, produces 64-bit hash)
 /// 
 /// Returns:
 ///     Hex string representation of the hash
 #[pyfunction]
-#[pyo3(signature = (path, algorithm = "phash", hash_size = 8))]
-fn compute_hash(path: &str, algorithm: &str, hash_size: usize) -> PyResult<String> {
-    let algo = match algorithm.to_lowercase().as_str() {
-        "ahash" | "average" => HashAlgorithm::AHash,
-        "dhash" | "difference" => HashAlgorithm::DHash,
-        "phash" | "perceptual" => HashAlgorithm::PHash,
-        _ => return Err(pyo3::exceptions::PyValueError::new_err(
-            format!("Unknown algorithm: {}. Use 'ahash', 'dhash', or 'phash'", algorithm)
-        )),
-    };
-    
-    let hash = ImageHash::from_path(path, algo, hash_size)
+#[pyo3(signature = (path, hash_size = 8))]
+fn compute_hash(path: &str, hash_size: usize) -> PyResult<String> {
+    let hash = ImageHash::from_path(path, HashAlgorithm::PHash, hash_size)
         .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
     
     Ok(hash.to_hex())
@@ -66,42 +53,31 @@ fn hamming_distance(hash1: &str, hash2: &str) -> PyResult<u32> {
     Ok(h1.distance(&h2))
 }
 
-/// Check if two images are perceptually similar.
+/// Check if two images are perceptually similar using pHash.
 /// 
 /// Args:
 ///     path1: Path to first image
 ///     path2: Path to second image
 ///     threshold: Maximum Hamming distance to consider similar (default: 10)
-///     algorithm: Hash algorithm to use (default: "phash")
 /// 
 /// Returns:
 ///     True if images are similar, False otherwise
 #[pyfunction]
-#[pyo3(signature = (path1, path2, threshold = 10, algorithm = "phash"))]
-fn are_similar(path1: &str, path2: &str, threshold: u32, algorithm: &str) -> PyResult<bool> {
-    let algo = match algorithm.to_lowercase().as_str() {
-        "ahash" | "average" => HashAlgorithm::AHash,
-        "dhash" | "difference" => HashAlgorithm::DHash,
-        "phash" | "perceptual" => HashAlgorithm::PHash,
-        _ => return Err(pyo3::exceptions::PyValueError::new_err(
-            format!("Unknown algorithm: {}", algorithm)
-        )),
-    };
-    
-    let hash1 = ImageHash::from_path(path1, algo, 8)
+#[pyo3(signature = (path1, path2, threshold = 10))]
+fn are_similar(path1: &str, path2: &str, threshold: u32) -> PyResult<bool> {
+    let hash1 = ImageHash::from_path(path1, HashAlgorithm::PHash, 8)
         .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
-    let hash2 = ImageHash::from_path(path2, algo, 8)
+    let hash2 = ImageHash::from_path(path2, HashAlgorithm::PHash, 8)
         .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
     
     Ok(hash1.distance(&hash2) <= threshold)
 }
 
-/// Find duplicate images in a list of file paths.
+/// Find duplicate images in a list of file paths using pHash.
 /// 
 /// Args:
 ///     paths: List of image file paths to check
 ///     threshold: Maximum Hamming distance for duplicates (default: 10)
-///     algorithm: Hash algorithm to use (default: "phash")
 /// 
 /// Returns:
 ///     List of duplicate groups, each containing:
@@ -109,22 +85,12 @@ fn are_similar(path1: &str, path2: &str, threshold: u32, algorithm: &str) -> PyR
 ///     - "hash": The representative hash for this group
 ///     - "best": Path to the highest resolution image in the group
 #[pyfunction]
-#[pyo3(signature = (paths, threshold = 10, algorithm = "phash"))]
+#[pyo3(signature = (paths, threshold = 10))]
 fn find_duplicate_images(
     paths: Vec<String>,
     threshold: u32,
-    algorithm: &str,
 ) -> PyResult<Vec<HashMap<String, PyObject>>> {
-    let algo = match algorithm.to_lowercase().as_str() {
-        "ahash" | "average" => HashAlgorithm::AHash,
-        "dhash" | "difference" => HashAlgorithm::DHash,
-        "phash" | "perceptual" => HashAlgorithm::PHash,
-        _ => return Err(pyo3::exceptions::PyValueError::new_err(
-            format!("Unknown algorithm: {}", algorithm)
-        )),
-    };
-    
-    let groups = find_duplicates_parallel(&paths, algo, threshold)
+    let groups = find_duplicates_parallel(&paths, HashAlgorithm::PHash, threshold)
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
     
     Python::with_gil(|py| {
@@ -143,36 +109,25 @@ fn find_duplicate_images(
     })
 }
 
-/// Compute hashes for multiple images in parallel.
+/// Compute pHashes for multiple images in parallel.
 /// 
 /// Args:
 ///     paths: List of image file paths
-///     algorithm: Hash algorithm to use (default: "phash")
 /// 
 /// Returns:
 ///     Dictionary mapping file paths to their hash strings.
 ///     Failed images are excluded from the result.
 #[pyfunction]
-#[pyo3(signature = (paths, algorithm = "phash"))]
+#[pyo3(signature = (paths))]
 fn compute_hashes_parallel(
     paths: Vec<String>,
-    algorithm: &str,
 ) -> PyResult<HashMap<String, String>> {
     use rayon::prelude::*;
-    
-    let algo = match algorithm.to_lowercase().as_str() {
-        "ahash" | "average" => HashAlgorithm::AHash,
-        "dhash" | "difference" => HashAlgorithm::DHash,
-        "phash" | "perceptual" => HashAlgorithm::PHash,
-        _ => return Err(pyo3::exceptions::PyValueError::new_err(
-            format!("Unknown algorithm: {}", algorithm)
-        )),
-    };
     
     let results: HashMap<String, String> = paths
         .par_iter()
         .filter_map(|path| {
-            ImageHash::from_path(path, algo, 8)
+            ImageHash::from_path(path, HashAlgorithm::PHash, 8)
                 .ok()
                 .map(|h| (path.clone(), h.to_hex()))
         })
