@@ -1,6 +1,7 @@
 from src.organiser import organise_files, print_summary
 from src.duplicate_handler import handle_duplicates, print_duplicate_report
 from src.undo_manager import undo_manager
+from src.compressor import compress_files, print_compression_summary, get_compression_settings
 import src.config
 
 def main():
@@ -16,6 +17,7 @@ def main():
         print("  [2] Find duplicate images")
         print("  [3] Configure Duplicate Sensitivity")
         print("  [4] Undo Last Operation")
+        print("  [5] Compress Images & Videos")
         print("  [Q] Quit")
         
         mode = input("\nSelect mode: ").strip().upper()
@@ -151,6 +153,64 @@ def main():
                 print("Check logs for detailed information!")
             else:
                 print("Source and Destination paths are required.")
+            continue
+        
+        if mode == "5":
+            # Compression mode
+            print("\n--- Compress Images & Videos ---")
+            source = input("Enter source folder path: ").strip()
+            
+            if not source:
+                print("Source folder is required.")
+                continue
+            
+            output = input("Enter output folder path for compressed files: ").strip()
+            if not output:
+                print("Output folder is required.")
+                continue
+            
+            # Ask for file types
+            print("\nWhat to compress:")
+            print("  [1] Images only")
+            print("  [2] Videos only")
+            print("  [3] Both images and videos")
+            
+            type_choice = input("Select option (1/2/3): ").strip()
+            type_map = {"1": "images", "2": "videos", "3": "both"}
+            file_types = type_map.get(type_choice, "both")
+            
+            # Ask for compression level
+            print("\n--- Compression Level ---")
+            print("  [1] High Quality (minimal compression, larger files)")
+            print("      Images: Quality=95, Videos: CRF=18 (visually lossless)")
+            print()
+            print("  [2] Balanced (recommended)")
+            print("      Images: Quality=85, Videos: CRF=23")
+            print()
+            print("  [3] Maximum Compression (smaller files, still good quality)")
+            print("      Images: Quality=75, Videos: CRF=28")
+            
+            level_choice = input("\nSelect compression level (1/2/3): ").strip()
+            level = int(level_choice) if level_choice in {"1", "2", "3"} else 2
+            
+            settings = get_compression_settings(level)
+            print(f"\n✓ Using compression level {level}: {settings['description']}")
+            
+            # Confirm
+            confirm = input(f"\nCompress {file_types} from '{source}' to '{output}'? (y/n): ").strip().lower()
+            if confirm != 'y':
+                print("Cancelled.")
+                continue
+            
+            print("\n⏳ Compressing files... This may take a while.")
+            print("   (Videos require FFmpeg to be installed)")
+            
+            stats = compress_files(source, output, level=level, file_types=file_types)
+            print_compression_summary(stats)
+            
+            if stats.errors > 0:
+                print(f"\n⚠️  {stats.errors} files failed to compress. Check logs for details.")
+            
             continue
             
         print("Invalid option. Please try again.")
