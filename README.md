@@ -10,7 +10,7 @@
 
 Core engineering highlights include a **hybrid architecture** where performance-critical image analysis is offloaded to a custom **Rust** module (`phash_rs`), ensuring rapid processing of large libraries while maintaining Python's ease of use.
 
-## � Table of Contents
+## 📑 Table of Contents
 
 - [Key Technical Features](#-key-technical-features)
   - [Temporal Asset Organization](#-temporal-asset-organization)
@@ -33,7 +33,7 @@ Core engineering highlights include a **hybrid architecture** where performance-
 - [Contributing](#-contributing)
 - [License](#-license)
 
-## �🚀 Key Technical Features
+## 🚀 Key Technical Features
 
 ### 📂 Temporal Asset Organization
 *   **Metadata-Driven Sorting**: Extracts embedded EXIF `DateTimeOriginal` (images) and container metadata (videos) to restructure files into a standardized `Year/Month` hierarchy.
