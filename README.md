@@ -10,7 +10,30 @@
 
 Core engineering highlights include a **hybrid architecture** where performance-critical image analysis is offloaded to a custom **Rust** module (`phash_rs`), ensuring rapid processing of large libraries while maintaining Python's ease of use.
 
-## 🚀 Key Technical Features
+## � Table of Contents
+
+- [Key Technical Features](#-key-technical-features)
+  - [Temporal Asset Organization](#-temporal-asset-organization)
+  - [Perceptual Deduplication (pHash)](#-perceptual-deduplication-phash)
+  - [Name-Based Duplicate Detection](#️-name-based-duplicate-detection)
+  - [Intelligent Media Compression](#️-intelligent-media-compression)
+  - [Configurable Heuristics](#️-configurable-heuristics)
+  - [Transactional Undo/Rollback](#️-transactional-undorollback)
+- [Architecture](#️-architecture)
+- [Tech Stack](#-tech-stack)
+- [Installation](#-installation)
+- [Usage](#️-usage)
+  - [Mode 1: Organize Files by Date](#mode-1-organize-files-by-date)
+  - [Mode 2: Deduplication Utility](#mode-2-deduplication-utility)
+  - [Mode 3: Configure Sensitivity](#mode-3-configure-sensitivity)
+  - [Mode 4: Undo Last Operation](#mode-4-undo-last-operation)
+  - [Mode 5: Compress Images & Videos](#mode-5-compress-images--videos)
+- [Performance & Logging](#-performance--logging)
+- [How Perceptual Duplicate Detection Works](#-how-perceptual-duplicate-detection-works)
+- [Contributing](#-contributing)
+- [License](#-license)
+
+## �🚀 Key Technical Features
 
 ### 📂 Temporal Asset Organization
 *   **Metadata-Driven Sorting**: Extracts embedded EXIF `DateTimeOriginal` (images) and container metadata (videos) to restructure files into a standardized `Year/Month` hierarchy.
