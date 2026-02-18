@@ -8,4 +8,5 @@ dependencies = [
     "hachoir>=3.3.0",
     "pillow>=12.0.0",
     "pillow-heif>=1.1.1",
+    "tqdm>=4.66.0",
 ]
