@@ -10,6 +10,14 @@
 
 Core engineering highlights include a **hybrid architecture** where performance-critical image analysis is offloaded to a custom **Rust** module (`phash_rs`), ensuring rapid processing of large libraries while maintaining Python's ease of use.
 
+## ✨ Implementation Highlights (Resume-Friendly)
+
+*   Built a **local web control panel** (React + Vite + Flask) on top of an existing Python/Rust CLI media pipeline.
+*   Implemented **background job orchestration** with live status polling for duplicate scan, organize, and compression workflows.
+*   Delivered **safe duplicate review UX** with grouped image cards, modal full preview, keyboard navigation, and protected best-image rules.
+*   Added **operations UI parity** for organize-by-date, sensitivity configuration, undo session management, and compression.
+*   Extended undo tooling with **session filtering and JSON export** for auditability and rollback workflows.
+
 ## 📑 Table of Contents
 
 - [Key Technical Features](#-key-technical-features)
@@ -19,6 +27,7 @@ Core engineering highlights include a **hybrid architecture** where performance-
   - [Intelligent Media Compression](#️-intelligent-media-compression)
   - [Configurable Heuristics](#️-configurable-heuristics)
   - [Transactional Undo/Rollback](#️-transactional-undorollback)
+    - [Localhost Web GUI (Phase 2)](#-localhost-web-gui-phase-2)
 - [Architecture](#️-architecture)
 - [Tech Stack](#-tech-stack)
 - [Installation](#-installation)
@@ -70,6 +79,13 @@ Core engineering highlights include a **hybrid architecture** where performance-
 *   **Session-Based Revert**: Allows full rollback of previous sessions, returning files to their original sources and effectively handling directory cleanup.
 *   **Crash Recovery**: Journals are written immediately, ensuring "Undo" capability persists even after program restart.
 
+### 🌐 Localhost Web GUI (Phase 2)
+*   **Complete workflow tabs**: Duplicates, Organize, Compression, Sensitivity, and Undo History in one interface.
+*   **Grouped duplicate UX**: Side-by-side group rendering, best image highlighting, selectable duplicates, and modal preview navigation.
+*   **Background job execution**: Long-running operations run asynchronously with live progress updates.
+*   **Operational safety controls**: Trash-mode delete, permanent-delete confirmation, and undo session rollback.
+*   **Undo observability**: Session filtering and JSON export for reporting and recovery workflows.
+
 ## 🛠️ Architecture
 
 The project follows a modular architecture:
@@ -79,7 +95,18 @@ The project follows a modular architecture:
 *   **`src/duplicate_handler.py`**: Manages duplicate detection workflows and reporting.
 *   **`src/phash.py`**: Bridge interface between Python and the underlying Rust engine.
 *   **`src/compressor.py`**: Handles parallel image and video compression with configurable quality levels.
+*   **`src/web_app.py`**: Flask API server with background job manager and localhost GUI serving.
+*   **`web/src/App.jsx`**: React frontend orchestrating duplicates, organize, compression, settings, and undo pages.
 *   **`phash_rs/`**: Rust crate providing high-performance implementation of perceptual hashing algorithm (pHash using DCT).
+
+### Web API Surface (Phase 2)
+
+*   **Health & Config**: `/api/health`, `/api/config`
+*   **Duplicates**: `/api/duplicates/scan`, `/api/duplicates/delete`, `/api/image`
+*   **Background Jobs**: `/api/jobs/<job_id>`
+*   **Organize**: `/api/organize/start`
+*   **Compression**: `/api/compress/start`
+*   **Undo**: `/api/undo/sessions`, `/api/undo/revert`
 
 ## 💻 Tech Stack
 
@@ -88,6 +115,8 @@ The project follows a modular architecture:
     *   `Pillow` / `pillow-heif`: Image processing, HEIC support, and compression.
     *   `hachoir`: Video metadata extraction.
     *   `maturin`: Bridge for building Rust binaries as Python modules.
+    *   `Flask`: Local API backend and GUI launcher server.
+    *   `React + Vite`: Interactive frontend for media workflow management.
 *   **Optional External Tools**:
     *   `FFmpeg`: Video compression and transcoding (only required for Mode 5 video compression).
 
@@ -188,18 +217,25 @@ A safety net for accidental operations.
 Reduce media file sizes while preserving visual quality.
 
 ### Mode 6: Start Web GUI (localhost)
-Launches a local web interface for grouped duplicate review, full preview, selection, and delete actions.
+Launches a local web interface with full phase-2 capabilities:
+
+*   Duplicate group review and selective cleanup with preview navigation
+*   Organize-by-date job execution and summary reporting
+*   Compression job execution and output metrics
+*   Sensitivity threshold configuration
+*   Undo session browsing, filtering, export, and targeted rollback
 
 Use these commands exactly:
 
 #### 1) Install Node.js (includes npm)
 
 ```bash
+# Debian/Ubuntu
 sudo apt update
 sudo apt install -y nodejs npm
 
-paru
-paru -S nodejs npm
+# Arch Linux
+sudo pacman -S nodejs npm
 ```
 
 #### 2) Build frontend
