@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import io
 import os
+import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -372,21 +374,51 @@ def _trash_target_for(path: Path) -> Path:
     return TRASH_ROOT / f"{timestamp}_{relative}"
 
 
-def _pick_folder_native(initial_dir: str | None = None) -> Path | None:
-    if os.name == "posix" and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
-        raise RuntimeError("No desktop display found. Run the Web GUI from a local desktop session.")
+def _run_picker_command(
+    command: list[str],
+    *,
+    cancel_return_codes: set[int] | None = None,
+    cancel_markers: tuple[str, ...] = (),
+) -> tuple[str, Path | None]:
+    cancel_codes = cancel_return_codes or {1}
 
-    start_dir = Path.home()
-    if initial_dir:
-        candidate = Path(initial_dir).expanduser()
-        if candidate.exists() and candidate.is_dir():
-            start_dir = candidate.resolve()
+    try:
+        proc = subprocess.run(command, capture_output=True, text=True, check=False)
+    except FileNotFoundError:
+        return "missing", None
+    except Exception as exc:
+        logger.debug("Folder picker command failed to start: %s (%s)", command[0], exc)
+        return "failed", None
 
+    stdout = (proc.stdout or "").strip()
+    stderr = (proc.stderr or "").strip().lower()
+
+    if proc.returncode == 0:
+        if not stdout:
+            return "cancelled", None
+        return "selected", Path(stdout).expanduser().resolve()
+
+    if proc.returncode in cancel_codes:
+        return "cancelled", None
+
+    if any(marker in stderr for marker in cancel_markers):
+        return "cancelled", None
+
+    logger.debug(
+        "Folder picker command returned non-cancel error: %s rc=%s stderr=%s",
+        command[0],
+        proc.returncode,
+        proc.stderr,
+    )
+    return "failed", None
+
+
+def _pick_folder_tkinter(start_dir: Path) -> Path | None:
     try:
         import tkinter as tk
         from tkinter import filedialog
     except Exception as exc:
-        raise RuntimeError("Tkinter is unavailable, so native folder picker cannot open.") from exc
+        raise RuntimeError("Tkinter is unavailable, so folder picker cannot open.") from exc
 
     root = tk.Tk()
     root.withdraw()
@@ -403,6 +435,86 @@ def _pick_folder_native(initial_dir: str | None = None) -> Path | None:
         return None
 
     return Path(selected).expanduser().resolve()
+
+
+def _pick_folder_native(initial_dir: str | None = None) -> Path | None:
+    if sys.platform.startswith("linux") and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+        raise RuntimeError("No desktop display found. Run the Web GUI from a local desktop session.")
+
+    start_dir = Path.home()
+    if initial_dir:
+        candidate = Path(initial_dir).expanduser()
+        if candidate.exists() and candidate.is_dir():
+            start_dir = candidate.resolve()
+
+    start_dir_str = str(start_dir)
+
+    if os.name == "nt":
+        escaped = start_dir_str.replace("'", "''")
+        script = (
+            "Add-Type -AssemblyName System.Windows.Forms; "
+            "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog; "
+            "$dialog.Description = 'Select folder'; "
+            f"$dialog.SelectedPath = '{escaped}'; "
+            "if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { "
+            "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; "
+            "Write-Output $dialog.SelectedPath }"
+        )
+
+        for shell in ("powershell", "pwsh"):
+            status, selected = _run_picker_command(
+                [shell, "-NoProfile", "-STA", "-Command", script],
+                cancel_return_codes={0, 1},
+            )
+            if status == "selected":
+                return selected
+            if status == "cancelled":
+                return None
+
+        return _pick_folder_tkinter(start_dir)
+
+    if os.name == "posix":
+        desktop_env = (os.environ.get("XDG_CURRENT_DESKTOP") or "").lower()
+
+        # Prefer KDE picker when available, then GNOME/GTK picker.
+        linux_commands: list[tuple[list[str], set[int], tuple[str, ...]]] = []
+        if "kde" in desktop_env:
+            linux_commands.append((["kdialog", "--getexistingdirectory", start_dir_str], {1}, ()))
+
+        linux_commands.append(
+            (["zenity", "--file-selection", "--directory", "--filename", f"{start_dir_str}/"], {1}, ())
+        )
+        linux_commands.append((["kdialog", "--getexistingdirectory", start_dir_str], {1}, ()))
+
+        for command, cancel_codes, cancel_markers in linux_commands:
+            status, selected = _run_picker_command(
+                command,
+                cancel_return_codes=cancel_codes,
+                cancel_markers=cancel_markers,
+            )
+            if status == "selected":
+                return selected
+            if status == "cancelled":
+                return None
+
+        escaped = start_dir_str.replace("\\", "\\\\").replace('"', '\\"')
+        applescript = (
+            'POSIX path of (choose folder with prompt "Select folder" '
+            f'default location POSIX file "{escaped}")'
+        )
+        status, selected = _run_picker_command(
+            ["osascript", "-e", applescript],
+            cancel_return_codes={1},
+            cancel_markers=("-128", "user canceled"),
+        )
+        if status == "selected":
+            return selected
+        if status == "cancelled":
+            return None
+
+        return _pick_folder_tkinter(start_dir)
+
+    return _pick_folder_tkinter(start_dir)
 
 
 @app.after_request
