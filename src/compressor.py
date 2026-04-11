@@ -203,7 +203,8 @@ def compress_files(
     source_dir: str,
     output_dir: str,
     level: CompressionLevel = 2,
-    file_types: Literal["images", "videos", "both"] = "both"
+    file_types: Literal["images", "videos", "both"] = "both",
+    progress_callback=None,
 ) -> CompressionStats:
     """
     Compress all images and/or videos in a directory.
@@ -213,6 +214,7 @@ def compress_files(
         output_dir: Output directory for compressed files
         level: Compression level (1-3)
         file_types: Which file types to compress
+        progress_callback: Optional callback(completed, total, file_path, success, file_type)
     
     Returns:
         CompressionStats: Statistics about the compression operation
@@ -247,9 +249,16 @@ def compress_files(
     
     stats.total_files = len(all_files)
     logger.info(f"Found {stats.total_files} files to compress")
+
+    if stats.total_files == 0 and progress_callback:
+        try:
+            progress_callback(0, 0, None, True, None)
+        except Exception:
+            pass
     
     # Process each file
-    for file_type, file_path in all_files:
+    total_files = len(all_files)
+    for completed, (file_type, file_path) in enumerate(all_files, 1):
         # Preserve directory structure
         rel_path = file_path.relative_to(source)
         output_path = output / rel_path
@@ -281,6 +290,12 @@ def compress_files(
         else:
             stats.errors += 1
             stats.compressed_size += original_size  # Count as no compression
+
+        if progress_callback:
+            try:
+                progress_callback(completed, total_files, file_path, success, file_type)
+            except Exception:
+                pass
     
     return stats
 

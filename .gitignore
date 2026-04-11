@@ -8,6 +8,7 @@ wheels/
 
 # Virtual environments
 .venv
+node_modules/
 
 #omit
 **/target/
@@ -20,3 +21,41 @@ credentials.json
 
 d
 s
+
+gdrive_sync.py
+
+# Sensitive files - do not publish
+.env
+.env.*
+*.env
+!.env.example
+
+# OAuth / API credentials and tokens
+credentials.json
+credentials.*.json
+client_secret*.json
+*token*.json
+*token*.pickle
+token.pickle
+oauth*.json
+
+# Local-only configuration overrides
+config.local.json
+config.*.local.json
+
+# Private keys, certs, and signing material
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+*.csr
+id_rsa
+id_ecdsa
+id_ed25519
+
+# Secret dumps and credential exports
+secrets.*
+*.secrets
+*.secret

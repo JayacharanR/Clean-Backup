@@ -28,6 +28,7 @@ Core engineering highlights include a **hybrid architecture** where performance-
   - [Mode 3: Configure Sensitivity](#mode-3-configure-sensitivity)
   - [Mode 4: Undo Last Operation](#mode-4-undo-last-operation)
   - [Mode 5: Compress Images & Videos](#mode-5-compress-images--videos)
+    - [Mode 6: Start Web GUI (localhost)](#mode-6-start-web-gui-localhost)
 - [Performance & Logging](#-performance--logging)
 - [How Perceptual Duplicate Detection Works](#-how-perceptual-duplicate-detection-works)
 - [Contributing](#-contributing)
@@ -140,6 +141,15 @@ The project follows a modular architecture:
     ffmpeg -version
     ```
 
+4.  **Optional: Install Node.js + npm (for Mode 6 Web GUI)**
+
+    If `npm` is not available, install Node.js and npm:
+
+    ```bash
+    sudo apt update
+    sudo apt install -y nodejs npm
+    ```
+
 ## 🕹️ Usage
 
 Execute the entry point:
@@ -148,7 +158,7 @@ Execute the entry point:
 python main.py
 ```
 
-The interactive CLI provides five modes:
+The interactive CLI provides six modes:
 
 ### Mode 1: Organize Files by Date
 Scans a source directory and migrates files to a destination according to `YYYY/Month` structure.
@@ -176,6 +186,44 @@ A safety net for accidental operations.
 
 ### Mode 5: Compress Images & Videos
 Reduce media file sizes while preserving visual quality.
+
+### Mode 6: Start Web GUI (localhost)
+Launches a local web interface for grouped duplicate review, full preview, selection, and delete actions.
+
+Use these commands exactly:
+
+#### 1) Install Node.js (includes npm)
+
+```bash
+sudo apt update
+sudo apt install -y nodejs npm
+
+paru
+paru -S nodejs npm
+```
+
+#### 2) Build frontend
+
+```bash
+cd /home/charan/Project/Clean_Backup/web
+npm install
+npm run build
+```
+
+#### 3) Install Python dependencies (if needed)
+
+```bash
+cd /home/charan/Project/Clean_Backup
+uv pip install -r requirements.txt
+```
+
+#### 4) Start app and open Web GUI
+
+```bash
+python main.py
+```
+
+Then select **option 6** from the CLI menu to run the website on localhost.
 
 #### Compression Levels
 

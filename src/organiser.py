@@ -192,7 +192,15 @@ def _process_single_file(args):
     return result
 
 
-def organise_files(src_dir, dest_dir, operation='move', check_duplicates=False, duplicate_threshold=THRESHOLD_SIMILAR, check_name_duplicates=False):
+def organise_files(
+    src_dir,
+    dest_dir,
+    operation='move',
+    check_duplicates=False,
+    duplicate_threshold=THRESHOLD_SIMILAR,
+    check_name_duplicates=False,
+    progress_callback=None,
+):
     """
     Organize media files into year/month folders.
     
@@ -203,6 +211,7 @@ def organise_files(src_dir, dest_dir, operation='move', check_duplicates=False, 
         check_duplicates: If True, detect and skip duplicate images before organizing (perceptual hashing)
         duplicate_threshold: Hamming distance threshold for duplicate detection
         check_name_duplicates: If True, detect and skip files with duplicate naming patterns (e.g., photo(1).jpg)
+        progress_callback: Optional callback(completed, total, result_dict) invoked per processed file
     """
     src_path = Path(src_dir)
     dest_path = Path(dest_dir)
@@ -291,6 +300,11 @@ def organise_files(src_dir, dest_dir, operation='move', check_duplicates=False, 
     if not file_list:
         logger.info("No files found to process")
         undo_manager.end_session()
+        if progress_callback:
+            try:
+                progress_callback(0, 0, None)
+            except Exception:
+                pass
         return stats
     
     # Determine number of workers (leave 1 core free)
@@ -307,12 +321,18 @@ def organise_files(src_dir, dest_dir, operation='move', check_duplicates=False, 
     
     # Process files in parallel with progress bar
     results = []
+    total_files = len(file_list)
     with Pool(processes=num_workers) as pool:
-        for result in tqdm(pool.imap(_process_single_file, worker_args), 
-                          total=len(file_list), 
+        for completed, result in enumerate(tqdm(pool.imap(_process_single_file, worker_args), 
+                          total=total_files, 
                           desc="Organizing files",
-                          unit="file"):
+                          unit="file"), 1):
             results.append(result)
+            if progress_callback:
+                try:
+                    progress_callback(completed, total_files, result)
+                except Exception:
+                    pass
     
     # Aggregate results and update statistics
     for result in results:
