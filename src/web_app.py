@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import os
 import threading
 import time
 import uuid
@@ -371,6 +372,39 @@ def _trash_target_for(path: Path) -> Path:
     return TRASH_ROOT / f"{timestamp}_{relative}"
 
 
+def _pick_folder_native(initial_dir: str | None = None) -> Path | None:
+    if os.name == "posix" and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+        raise RuntimeError("No desktop display found. Run the Web GUI from a local desktop session.")
+
+    start_dir = Path.home()
+    if initial_dir:
+        candidate = Path(initial_dir).expanduser()
+        if candidate.exists() and candidate.is_dir():
+            start_dir = candidate.resolve()
+
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except Exception as exc:
+        raise RuntimeError("Tkinter is unavailable, so native folder picker cannot open.") from exc
+
+    root = tk.Tk()
+    root.withdraw()
+    root.update_idletasks()
+    try:
+        root.attributes("-topmost", True)
+    except Exception:
+        pass
+
+    selected = filedialog.askdirectory(initialdir=str(start_dir), title="Select folder")
+    root.destroy()
+
+    if not selected:
+        return None
+
+    return Path(selected).expanduser().resolve()
+
+
 @app.after_request
 def _after_request(response):
     response.headers["Access-Control-Allow-Origin"] = "*"
@@ -526,6 +560,26 @@ def api_job_status(job_id: str):
             },
         }
     )
+
+
+@app.route("/api/folder/pick", methods=["POST", "OPTIONS"])
+def api_pick_folder():
+    if request.method == "OPTIONS":
+        return jsonify({"ok": True})
+
+    payload = request.get_json(silent=True) or {}
+    initial_dir = str(payload.get("initial_dir", "")).strip() or None
+
+    try:
+        selected_path = _pick_folder_native(initial_dir)
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+    if selected_path is None:
+        return jsonify({"ok": True, "cancelled": True, "path": None})
+
+    _add_allowed_root(selected_path)
+    return jsonify({"ok": True, "cancelled": False, "path": str(selected_path)})
 
 
 @app.route("/api/duplicates/delete", methods=["POST", "OPTIONS"])

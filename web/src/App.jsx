@@ -101,6 +101,7 @@ export default function App() {
   const [cmpJobId, setCmpJobId] = useState(null);
   const [cmpJob, setCmpJob] = useState(null);
   const [cmpResult, setCmpResult] = useState(null);
+  const [pickerBusyKey, setPickerBusyKey] = useState("");
 
   useEffect(() => {
     fetchConfig();
@@ -264,6 +265,41 @@ export default function App() {
       if (data.ok) setSessions(data.sessions || []);
     } catch {
       // Keep non-blocking.
+    }
+  }
+
+  async function pickFolder(fieldKey, currentValue, setPath) {
+    if (pickerBusyKey) return;
+
+    setPickerBusyKey(fieldKey);
+    setError("");
+
+    try {
+      const res = await fetch(`${API_BASE}/api/folder/pick`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ initial_dir: currentValue?.trim?.() || "" })
+      });
+
+      const contentType = (res.headers.get("content-type") || "").toLowerCase();
+      if (!contentType.includes("application/json")) {
+        const raw = await res.text();
+        const looksLikeHtml = raw.trim().startsWith("<");
+        if (looksLikeHtml || res.status === 404) {
+          throw new Error("Folder picker API is unavailable. Restart the Python app and open Mode 6 again.");
+        }
+        throw new Error("Folder picker returned an unexpected response from server.");
+      }
+
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || "Could not open folder picker");
+      if (!data.cancelled && data.path) {
+        setPath(data.path);
+      }
+    } catch (err) {
+      setError(err.message || "Could not open folder picker");
+    } finally {
+      setPickerBusyKey("");
     }
   }
 
@@ -536,7 +572,17 @@ export default function App() {
             <form onSubmit={startDuplicateScan} className="scan-form">
               <label>
                 Source folder path
-                <input type="text" value={sourceDir} onChange={(e) => setSourceDir(e.target.value)} placeholder="/absolute/path/to/folder" />
+                <div className="path-input-row">
+                  <input type="text" value={sourceDir} onChange={(e) => setSourceDir(e.target.value)} placeholder="/absolute/path/to/folder" />
+                  <button
+                    type="button"
+                    className="secondary browse-btn"
+                    onClick={() => pickFolder("dup_source", sourceDir, setSourceDir)}
+                    disabled={Boolean(dupJobId) || Boolean(pickerBusyKey)}
+                  >
+                    {pickerBusyKey === "dup_source" ? "Opening..." : "Select Folder"}
+                  </button>
+                </div>
               </label>
 
               <label>
@@ -642,11 +688,31 @@ export default function App() {
           <form onSubmit={startOrganize} className="grid-two">
             <label>
               Source directory
-              <input type="text" value={orgSource} onChange={(e) => setOrgSource(e.target.value)} placeholder="/path/source" />
+              <div className="path-input-row">
+                <input type="text" value={orgSource} onChange={(e) => setOrgSource(e.target.value)} placeholder="/path/source" />
+                <button
+                  type="button"
+                  className="secondary browse-btn"
+                  onClick={() => pickFolder("org_source", orgSource, setOrgSource)}
+                  disabled={Boolean(orgJobId) || Boolean(pickerBusyKey)}
+                >
+                  {pickerBusyKey === "org_source" ? "Opening..." : "Select Folder"}
+                </button>
+              </div>
             </label>
             <label>
               Destination directory
-              <input type="text" value={orgDestination} onChange={(e) => setOrgDestination(e.target.value)} placeholder="/path/destination" />
+              <div className="path-input-row">
+                <input type="text" value={orgDestination} onChange={(e) => setOrgDestination(e.target.value)} placeholder="/path/destination" />
+                <button
+                  type="button"
+                  className="secondary browse-btn"
+                  onClick={() => pickFolder("org_destination", orgDestination, setOrgDestination)}
+                  disabled={Boolean(orgJobId) || Boolean(pickerBusyKey)}
+                >
+                  {pickerBusyKey === "org_destination" ? "Opening..." : "Select Folder"}
+                </button>
+              </div>
             </label>
             <label>
               Operation
@@ -694,11 +760,31 @@ export default function App() {
           <form onSubmit={startCompression} className="grid-two">
             <label>
               Source directory
-              <input type="text" value={cmpSource} onChange={(e) => setCmpSource(e.target.value)} placeholder="/path/source" />
+              <div className="path-input-row">
+                <input type="text" value={cmpSource} onChange={(e) => setCmpSource(e.target.value)} placeholder="/path/source" />
+                <button
+                  type="button"
+                  className="secondary browse-btn"
+                  onClick={() => pickFolder("cmp_source", cmpSource, setCmpSource)}
+                  disabled={Boolean(cmpJobId) || Boolean(pickerBusyKey)}
+                >
+                  {pickerBusyKey === "cmp_source" ? "Opening..." : "Select Folder"}
+                </button>
+              </div>
             </label>
             <label>
               Output directory
-              <input type="text" value={cmpOutput} onChange={(e) => setCmpOutput(e.target.value)} placeholder="/path/output" />
+              <div className="path-input-row">
+                <input type="text" value={cmpOutput} onChange={(e) => setCmpOutput(e.target.value)} placeholder="/path/output" />
+                <button
+                  type="button"
+                  className="secondary browse-btn"
+                  onClick={() => pickFolder("cmp_output", cmpOutput, setCmpOutput)}
+                  disabled={Boolean(cmpJobId) || Boolean(pickerBusyKey)}
+                >
+                  {pickerBusyKey === "cmp_output" ? "Opening..." : "Select Folder"}
+                </button>
+              </div>
             </label>
             <label>
               File types

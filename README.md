@@ -224,6 +224,7 @@ Launches a local web interface with full phase-2 capabilities:
 *   Compression job execution and output metrics
 *   Sensitivity threshold configuration
 *   Undo session browsing, filtering, export, and targeted rollback
+*   Click **Select Folder** beside path fields to open the native OS folder picker (desktop session required)
 
 Use these commands exactly:
 

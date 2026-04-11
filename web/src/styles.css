@@ -114,6 +114,20 @@ select {
   background: #fff;
 }
 
+.path-input-row {
+  display: flex;
+  gap: 8px;
+}
+
+.path-input-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.browse-btn {
+  white-space: nowrap;
+}
+
 button {
   border: 0;
   border-radius: 10px;
@@ -491,6 +505,10 @@ button:disabled {
 
   .group-head-actions button {
     flex: 1;
+  }
+
+  .path-input-row {
+    flex-direction: column;
   }
 
   .modal-shell {
