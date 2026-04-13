@@ -625,7 +625,6 @@ export default function App() {
                 <div><span>Groups</span><strong>{scanSummary.duplicate_groups}</strong></div>
                 <div><span>Duplicates</span><strong>{scanSummary.total_duplicates}</strong></div>
                 <div><span>Recoverable</span><strong>{scanSummary.space_recoverable_human}</strong></div>
-                <div><span>Backend</span><strong>{scanSummary.backend}</strong></div>
                 <div><span>Scan time</span><strong>{formatSeconds(scanSummary.scan_time_seconds)}</strong></div>
                 <div><span>Core scan</span><strong>{formatSeconds(scanSummary.core_scan_seconds)}</strong></div>
                 <div><span>Payload build</span><strong>{formatSeconds(scanSummary.payload_time_seconds)}</strong></div>
