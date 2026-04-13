@@ -210,12 +210,16 @@ def _scan_duplicates_task(progress: Callable[[int, str], None], source_dir: str,
 
     _add_allowed_root(source)
 
+    scan_started = time.perf_counter()
+    scan_stats: dict[str, float | int] = {}
     groups = scan_for_duplicates_with_progress(
         str(source),
         threshold=threshold,
         progress_callback=progress,
+        stats_out=scan_stats,
     )
 
+    payload_started = time.perf_counter()
     progress(91, "Building response payload")
     payload_groups: list[dict[str, Any]] = []
     total_duplicates = 0
@@ -250,6 +254,17 @@ def _scan_duplicates_task(progress: Callable[[int, str], None], source_dir: str,
         progress(91 + int(((idx + 1) / max(len(groups), 1)) * 7), "Preparing groups")
 
     progress(98, "Finishing")
+
+    payload_time_seconds = time.perf_counter() - payload_started
+    scan_time_seconds = time.perf_counter() - scan_started
+    images_found = int(scan_stats.get("images_found_total", 0))
+    average_images_per_group = (
+        sum(group["count"] for group in payload_groups) / len(payload_groups)
+        if payload_groups
+        else 0.0
+    )
+    duplicate_ratio_pct = (total_duplicates / images_found) * 100 if images_found else 0.0
+
     return {
         "source_dir": str(source),
         "threshold": threshold,
@@ -258,6 +273,19 @@ def _scan_duplicates_task(progress: Callable[[int, str], None], source_dir: str,
         "total_duplicates": total_duplicates,
         "space_recoverable_bytes": recoverable,
         "space_recoverable_human": _format_bytes(recoverable),
+        "scan_time_seconds": round(scan_time_seconds, 2),
+        "core_scan_seconds": round(float(scan_stats.get("core_scan_seconds", 0.0)), 2),
+        "payload_time_seconds": round(payload_time_seconds, 2),
+        "collection_time_seconds": round(float(scan_stats.get("collection_seconds", 0.0)), 2),
+        "hash_time_seconds": round(float(scan_stats.get("hashing_seconds", 0.0)), 2),
+        "group_time_seconds": round(float(scan_stats.get("grouping_seconds", 0.0)), 2),
+        "files_seen": int(scan_stats.get("files_seen_total", 0)),
+        "images_found": images_found,
+        "hashes_fetched": int(scan_stats.get("hashes_fetched_total", 0)),
+        "images_without_hash": int(scan_stats.get("images_without_hash_total", 0)),
+        "hash_success_rate_pct": round(float(scan_stats.get("hash_success_rate_pct", 0.0)), 1),
+        "avg_images_per_group": round(average_images_per_group, 2),
+        "duplicate_ratio_pct": round(duplicate_ratio_pct, 1),
         "groups": payload_groups,
     }
 

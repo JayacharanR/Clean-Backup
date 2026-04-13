@@ -7,6 +7,7 @@ This module is designed to be modular and can be disabled if buggy.
 
 import shutil
 import threading
+import time
 from pathlib import Path
 from typing import Optional, List, Literal, Callable
 from dataclasses import dataclass
@@ -41,6 +42,7 @@ def scan_for_duplicates_with_progress(
     source_dir: str,
     threshold: int = THRESHOLD_SIMILAR,
     progress_callback: Optional[Callable[[int, str], None]] = None,
+    stats_out: Optional[dict[str, float | int]] = None,
 ) -> List[DuplicateGroup]:
     """Scan for duplicates with staged progress and live counters."""
 
@@ -52,11 +54,14 @@ def scan_for_duplicates_with_progress(
     if not source_path.exists() or not source_path.is_dir():
         raise ValueError(f"Source directory not found: {source_path}")
 
+    overall_started = time.perf_counter()
+
     logger.info(f"Scanning for duplicates with staged progress using {get_backend()}")
     logger.info(f"Threshold: {threshold}")
 
     # Stage 1: collect candidate image files.
     emit(1, "Collecting images to scan for duplicates")
+    collect_started = time.perf_counter()
     image_paths: List[str] = []
     files_seen = 0
 
@@ -73,13 +78,30 @@ def scan_for_duplicates_with_progress(
             emit(pulse, f"Collecting images: {len(image_paths)} found")
 
     total_images = len(image_paths)
+    collection_seconds = time.perf_counter() - collect_started
     emit(20, f"Images found to scan for duplicates: {total_images}")
 
     if total_images < 2:
+        if stats_out is not None:
+            stats_out.update(
+                {
+                    "files_seen_total": files_seen,
+                    "images_found_total": total_images,
+                    "hashes_fetched_total": 0,
+                    "images_without_hash_total": total_images,
+                    "hash_success_rate_pct": 0.0,
+                    "groups_detected": 0,
+                    "collection_seconds": collection_seconds,
+                    "hashing_seconds": 0.0,
+                    "grouping_seconds": 0.0,
+                    "core_scan_seconds": time.perf_counter() - overall_started,
+                }
+            )
         emit(90, f"Not enough images for duplicate detection (images found: {total_images})")
         return []
 
     # Stage 2: fetch perceptual hashes in chunks so progress advances smoothly.
+    hash_started = time.perf_counter()
     chunk_size = 256
     total_chunks = (total_images + chunk_size - 1) // chunk_size
     hashes_fetched = 0
@@ -103,8 +125,26 @@ def scan_for_duplicates_with_progress(
     # Remove duplicates while preserving order.
     hashed_paths = list(dict.fromkeys(hashed_paths))
     hashes_fetched = len(hashed_paths)
+    hashing_seconds = time.perf_counter() - hash_started
+    hash_success_rate_pct = (hashes_fetched / total_images) * 100 if total_images else 0.0
+    images_without_hash = max(total_images - hashes_fetched, 0)
 
     if hashes_fetched < 2:
+        if stats_out is not None:
+            stats_out.update(
+                {
+                    "files_seen_total": files_seen,
+                    "images_found_total": total_images,
+                    "hashes_fetched_total": hashes_fetched,
+                    "images_without_hash_total": images_without_hash,
+                    "hash_success_rate_pct": hash_success_rate_pct,
+                    "groups_detected": 0,
+                    "collection_seconds": collection_seconds,
+                    "hashing_seconds": hashing_seconds,
+                    "grouping_seconds": 0.0,
+                    "core_scan_seconds": time.perf_counter() - overall_started,
+                }
+            )
         emit(
             90,
             f"Not enough valid hashes to detect duplicates | Hashes fetched: {hashes_fetched}/{total_images} | Images found: {total_images}",
@@ -124,6 +164,7 @@ def scan_for_duplicates_with_progress(
             )
 
     emit(71, f"Grouping duplicates from hashed images: {hashes_fetched}")
+    grouping_started = time.perf_counter()
     heartbeat = threading.Thread(target=progress_heartbeat, daemon=True)
     heartbeat.start()
     try:
@@ -131,6 +172,24 @@ def scan_for_duplicates_with_progress(
     finally:
         done.set()
         heartbeat.join(timeout=1.0)
+
+    grouping_seconds = time.perf_counter() - grouping_started
+    core_scan_seconds = time.perf_counter() - overall_started
+    if stats_out is not None:
+        stats_out.update(
+            {
+                "files_seen_total": files_seen,
+                "images_found_total": total_images,
+                "hashes_fetched_total": hashes_fetched,
+                "images_without_hash_total": images_without_hash,
+                "hash_success_rate_pct": hash_success_rate_pct,
+                "groups_detected": len(groups),
+                "collection_seconds": collection_seconds,
+                "hashing_seconds": hashing_seconds,
+                "grouping_seconds": grouping_seconds,
+                "core_scan_seconds": core_scan_seconds,
+            }
+        )
 
     emit(
         90,

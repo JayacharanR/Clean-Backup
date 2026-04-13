@@ -13,6 +13,18 @@ function bytesToHuman(bytes) {
   return `${bytes} B`;
 }
 
+function formatSeconds(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "0.00s";
+  return `${n.toFixed(2)}s`;
+}
+
+function formatPercent(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "0.0%";
+  return `${n.toFixed(1)}%`;
+}
+
 function normalizeProgress(value) {
   const parsed = typeof value === "number" ? value : parseFloat(String(value).replace("%", ""));
   if (Number.isNaN(parsed)) return 0;
@@ -614,6 +626,19 @@ export default function App() {
                 <div><span>Duplicates</span><strong>{scanSummary.total_duplicates}</strong></div>
                 <div><span>Recoverable</span><strong>{scanSummary.space_recoverable_human}</strong></div>
                 <div><span>Backend</span><strong>{scanSummary.backend}</strong></div>
+                <div><span>Scan time</span><strong>{formatSeconds(scanSummary.scan_time_seconds)}</strong></div>
+                <div><span>Core scan</span><strong>{formatSeconds(scanSummary.core_scan_seconds)}</strong></div>
+                <div><span>Payload build</span><strong>{formatSeconds(scanSummary.payload_time_seconds)}</strong></div>
+                <div><span>Collection</span><strong>{formatSeconds(scanSummary.collection_time_seconds)}</strong></div>
+                <div><span>Hashing</span><strong>{formatSeconds(scanSummary.hash_time_seconds)}</strong></div>
+                <div><span>Grouping</span><strong>{formatSeconds(scanSummary.group_time_seconds)}</strong></div>
+                <div><span>Files walked</span><strong>{scanSummary.files_seen ?? 0}</strong></div>
+                <div><span>Images found</span><strong>{scanSummary.images_found ?? 0}</strong></div>
+                <div><span>Hashes fetched</span><strong>{scanSummary.hashes_fetched ?? 0}</strong></div>
+                <div><span>Images without hash</span><strong>{scanSummary.images_without_hash ?? 0}</strong></div>
+                <div><span>Hash success</span><strong>{formatPercent(scanSummary.hash_success_rate_pct)}</strong></div>
+                <div><span>Avg images/group</span><strong>{Number(scanSummary.avg_images_per_group || 0).toFixed(2)}</strong></div>
+                <div><span>Duplicate ratio</span><strong>{formatPercent(scanSummary.duplicate_ratio_pct)}</strong></div>
               </div>
             ) : null}
           </section>
