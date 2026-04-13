@@ -352,23 +352,30 @@ export default function App() {
     });
   }
 
-  function selectAllInGroup(group) {
+  function toggleGroupSelection(group) {
     setSelected((prev) => {
       const next = { ...prev };
-      for (const image of group.images) {
-        if (image.is_best && !allowBestDelete) continue;
-        next[image.path] = image;
+
+      const selectableImages = group.images.filter((image) => !(image.is_best && !allowBestDelete));
+      if (selectableImages.length === 0) return next;
+
+      const allSelected = selectableImages.every((image) => Boolean(next[image.path]));
+      for (const image of selectableImages) {
+        if (allSelected) {
+          delete next[image.path];
+        } else {
+          next[image.path] = image;
+        }
       }
+
       return next;
     });
   }
 
-  function clearGroupSelection(group) {
-    setSelected((prev) => {
-      const next = { ...prev };
-      for (const image of group.images) delete next[image.path];
-      return next;
-    });
+  function isGroupFullySelected(group) {
+    const selectableImages = group.images.filter((image) => !(image.is_best && !allowBestDelete));
+    if (selectableImages.length === 0) return false;
+    return selectableImages.every((image) => Boolean(selected[image.path]));
   }
 
   const selectedList = useMemo(() => Object.values(selected), [selected]);
@@ -653,8 +660,9 @@ export default function App() {
                     <p>{group.count} images | hash {group.hash}</p>
                   </div>
                   <div className="group-head-actions">
-                    <button onClick={() => selectAllInGroup(group)}>Select group</button>
-                    <button onClick={() => clearGroupSelection(group)}>Clear group</button>
+                    <button onClick={() => toggleGroupSelection(group)}>
+                      {isGroupFullySelected(group) ? "Deselect group" : "Select group"}
+                    </button>
                   </div>
                 </div>
 
