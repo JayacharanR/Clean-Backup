@@ -555,10 +555,7 @@ export default function App() {
       <div className="orb orb-b" />
 
       <header className="hero">
-        <h1>Clean-Backup Web Studio</h1>
-        <p>
-          Phase 2 is active: duplicates, organize, sensitivity settings, undo history picker, and compression all run in one local GUI.
-        </p>
+        <h1>Clean-Backup</h1>
       </header>
 
       <section className="panel tab-panel">
