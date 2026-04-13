@@ -211,14 +211,14 @@ def compute_hashes_batch(
     """
     if _USE_RUST:
         try:
-            return _phash.compute_hashes_parallel(paths, algorithm) # type: ignore
+            return _phash.compute_hashes_parallel(paths)
         except Exception as e:
             logger.error(f"Batch hashing failed: {e}")
     
     # Python fallback
     result = {}
     for path in paths:
-        h = compute_hash(path, algorithm)  # type: ignore
+        h = compute_hash(path)
         if h:
             result[path] = h
     return result

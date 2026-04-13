@@ -6,12 +6,16 @@ This module is designed to be modular and can be disabled if buggy.
 """
 
 import shutil
+import threading
 from pathlib import Path
-from typing import Optional, List, Literal
+from typing import Optional, List, Literal, Callable
 from dataclasses import dataclass
+from src import constants
 from src.phash import (
-    find_duplicates, 
-    DuplicateGroup, 
+    compute_hashes_batch,
+    find_duplicates,
+    find_duplicates_from_paths,
+    DuplicateGroup,
     is_rust_available,
     get_backend,
     THRESHOLD_SIMILAR,
@@ -31,6 +35,108 @@ class DuplicateReport:
     duplicates_moved: int
     errors: int
     groups: List[DuplicateGroup]
+
+
+def scan_for_duplicates_with_progress(
+    source_dir: str,
+    threshold: int = THRESHOLD_SIMILAR,
+    progress_callback: Optional[Callable[[int, str], None]] = None,
+) -> List[DuplicateGroup]:
+    """Scan for duplicates with staged progress and live counters."""
+
+    def emit(progress: int, message: str) -> None:
+        if progress_callback:
+            progress_callback(max(1, min(99, int(progress))), message)
+
+    source_path = Path(source_dir).expanduser().resolve()
+    if not source_path.exists() or not source_path.is_dir():
+        raise ValueError(f"Source directory not found: {source_path}")
+
+    logger.info(f"Scanning for duplicates with staged progress using {get_backend()}")
+    logger.info(f"Threshold: {threshold}")
+
+    # Stage 1: collect candidate image files.
+    emit(1, "Collecting images to scan for duplicates")
+    image_paths: List[str] = []
+    files_seen = 0
+
+    for file_path in source_path.rglob("*"):
+        if not file_path.is_file():
+            continue
+
+        files_seen += 1
+        if file_path.suffix.lower() in constants.IMAGE_EXTENSIONS:
+            image_paths.append(str(file_path.absolute()))
+
+        if files_seen % 300 == 0:
+            pulse = min(19, 1 + (files_seen // 300))
+            emit(pulse, f"Collecting images: {len(image_paths)} found")
+
+    total_images = len(image_paths)
+    emit(20, f"Images found to scan for duplicates: {total_images}")
+
+    if total_images < 2:
+        emit(90, f"Not enough images for duplicate detection (images found: {total_images})")
+        return []
+
+    # Stage 2: fetch perceptual hashes in chunks so progress advances smoothly.
+    chunk_size = 256
+    total_chunks = (total_images + chunk_size - 1) // chunk_size
+    hashes_fetched = 0
+    hashed_paths: List[str] = []
+
+    for idx in range(total_chunks):
+        start = idx * chunk_size
+        end = min(start + chunk_size, total_images)
+        chunk = image_paths[start:end]
+        chunk_hashes = compute_hashes_batch(chunk)
+
+        hashes_fetched += len(chunk_hashes)
+        hashed_paths.extend(chunk_hashes.keys())
+
+        percent = 21 + int(((idx + 1) / max(total_chunks, 1)) * 49)
+        emit(
+            percent,
+            f"Fetching hashes: {hashes_fetched}/{total_images} | Images found: {total_images}",
+        )
+
+    # Remove duplicates while preserving order.
+    hashed_paths = list(dict.fromkeys(hashed_paths))
+    hashes_fetched = len(hashed_paths)
+
+    if hashes_fetched < 2:
+        emit(
+            90,
+            f"Not enough valid hashes to detect duplicates | Hashes fetched: {hashes_fetched}/{total_images} | Images found: {total_images}",
+        )
+        return []
+
+    # Stage 3: run grouping on hashed candidates using existing Rust/Python engine.
+    done = threading.Event()
+    progress_state = {"value": 71}
+
+    def progress_heartbeat() -> None:
+        while not done.wait(timeout=0.6):
+            progress_state["value"] = min(89, progress_state["value"] + 1)
+            emit(
+                progress_state["value"],
+                f"Grouping duplicates from hashed images: {hashes_fetched}",
+            )
+
+    emit(71, f"Grouping duplicates from hashed images: {hashes_fetched}")
+    heartbeat = threading.Thread(target=progress_heartbeat, daemon=True)
+    heartbeat.start()
+    try:
+        groups = find_duplicates_from_paths(hashed_paths, threshold)
+    finally:
+        done.set()
+        heartbeat.join(timeout=1.0)
+
+    emit(
+        90,
+        f"Detected {len(groups)} duplicate groups | Hashes fetched: {hashes_fetched}/{total_images} | Images found: {total_images}",
+    )
+    return groups
 
 
 def scan_for_duplicates(

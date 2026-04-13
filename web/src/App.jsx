@@ -13,16 +13,23 @@ function bytesToHuman(bytes) {
   return `${bytes} B`;
 }
 
+function normalizeProgress(value) {
+  const parsed = typeof value === "number" ? value : parseFloat(String(value).replace("%", ""));
+  if (Number.isNaN(parsed)) return 0;
+  return Math.max(0, Math.min(100, Math.round(parsed)));
+}
+
 function JobProgress({ title, job }) {
   if (!job) return null;
+  const safeProgress = normalizeProgress(job.progress);
   return (
     <div className="progress-wrap">
       <div className="progress-label">
         <span>{title}: {job.message}</span>
-        <span>{job.progress}%</span>
+        <span>{safeProgress}%</span>
       </div>
       <div className="progress-bar">
-        <div style={{ width: `${job.progress}%` }} />
+        <div style={{ width: `${safeProgress}%` }} />
       </div>
     </div>
   );
@@ -128,7 +135,7 @@ export default function App() {
           setError(data.job.error || "Duplicate scan failed");
           setDupJobId(null);
         } else {
-          timer = window.setTimeout(poll, 1200);
+          timer = window.setTimeout(poll, 500);
         }
       } catch (err) {
         setError(err.message || "Duplicate scan polling failed");

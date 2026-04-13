@@ -17,7 +17,7 @@ from PIL import Image
 
 from src.compressor import compress_files, get_compression_settings
 from src.config import get_threshold, load_config, save_config
-from src.duplicate_handler import scan_for_duplicates
+from src.duplicate_handler import scan_for_duplicates_with_progress
 from src.logger import logger
 from src.organiser import organise_files
 from src.phash import get_backend
@@ -210,10 +210,13 @@ def _scan_duplicates_task(progress: Callable[[int, str], None], source_dir: str,
 
     _add_allowed_root(source)
 
-    progress(15, "Scanning for duplicate groups")
-    groups = scan_for_duplicates(str(source), threshold=threshold)
+    groups = scan_for_duplicates_with_progress(
+        str(source),
+        threshold=threshold,
+        progress_callback=progress,
+    )
 
-    progress(70, "Building response payload")
+    progress(91, "Building response payload")
     payload_groups: list[dict[str, Any]] = []
     total_duplicates = 0
     recoverable = 0
@@ -244,7 +247,7 @@ def _scan_duplicates_task(progress: Callable[[int, str], None], source_dir: str,
                 }
             )
 
-        progress(70 + int(((idx + 1) / max(len(groups), 1)) * 25), "Preparing groups")
+        progress(91 + int(((idx + 1) / max(len(groups), 1)) * 7), "Preparing groups")
 
     progress(98, "Finishing")
     return {
