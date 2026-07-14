@@ -10,7 +10,7 @@
 
 Core engineering highlights include a **hybrid architecture** where performance-critical image analysis is offloaded to a custom **Rust** module (`phash_rs`), ensuring rapid processing of large libraries while maintaining Python's ease of use.
 
-## ✨ Implementation Highlights (Resume-Friendly)
+## ✨ Implementation Highlights
 
 *   Built a **local web control panel** (React + Vite + Flask) on top of an existing Python/Rust CLI media pipeline.
 *   Implemented **background job orchestration** with live status polling for duplicate scan, organize, and compression workflows.

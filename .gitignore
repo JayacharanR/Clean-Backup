@@ -10,6 +10,10 @@ wheels/
 .venv
 node_modules/
 
+# Databases
+*.db
+*.sqlite3
+
 #omit
 **/target/
 todo.md

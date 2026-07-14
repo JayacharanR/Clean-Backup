@@ -2,6 +2,15 @@ import { useEffect, useMemo, useState } from "react";
 
 const API_BASE = "";
 
+const CATEGORY_ICONS = {
+  videos: "🎥", documents: "📄", screenshots: "🖥️", people: "👤",
+  travel: "✈️", family: "👨‍👩‍👧‍👦", selfies: "🤳", events: "🎉",
+  nature: "🌿", food: "🍽️", pets: "🐾", vehicles: "🚗",
+  art: "🏛️", night: "🌙", other: "📁",
+};
+
+const STAGE_NAMES = ["EXIF", "Heuristic", "Scene", "Faces", "Recognition", "Resolve"];
+
 function imageUrl(path, variant = "thumb") {
   return `${API_BASE}/api/image?path=${encodeURIComponent(path)}&variant=${variant}`;
 }
@@ -122,10 +131,101 @@ export default function App() {
   const [cmpResult, setCmpResult] = useState(null);
   const [pickerBusyKey, setPickerBusyKey] = useState("");
 
+  // ── Classify state ──────────────────────────────────────────────────
+  const [clsSource, setClsSource] = useState("");
+  const [clsCategories, setClsCategories] = useState([]);
+  const [clsFolderScheme, setClsFolderScheme] = useState("yyyy_mm_category");
+  const [clsMultiCategory, setClsMultiCategory] = useState("tags");
+  const [clsFaceSensitivity, setClsFaceSensitivity] = useState("balanced");
+  const [clsConfidence, setClsConfidence] = useState(0.5);
+  const [clsHomeLat, setClsHomeLat] = useState("");
+  const [clsHomeLon, setClsHomeLon] = useState("");
+  const [clsJobId, setClsJobId] = useState(null);
+  const [clsJob, setClsJob] = useState(null);
+  const [clsResult, setClsResult] = useState(null);
+  const [clsRunId, setClsRunId] = useState(null);
+  const [clsDest, setClsDest] = useState("");
+  const [clsOperation, setClsOperation] = useState("move");
+  const [clsApplyJobId, setClsApplyJobId] = useState(null);
+  const [clsApplyJob, setClsApplyJob] = useState(null);
+  // ── People state ────────────────────────────────────────────────────
+  const [people, setPeople] = useState([]);
+  const [faceClusters, setFaceClusters] = useState([]);
+  const [newPersonName, setNewPersonName] = useState("");
+  const [clusterNames, setClusterNames] = useState({});
+
+  // ── Review queue state ──────────────────────────────────────────────
+  const [reviewQueue, setReviewQueue] = useState([]);
+  const [reviewFilter, setReviewFilter] = useState("all");
+
+  // ── Settings: purge ─────────────────────────────────────────────────
+  const [purgeConfirm, setPurgeConfirm] = useState("");
+  const [purgeBusy, setPurgeBusy] = useState(false);
+
   useEffect(() => {
     fetchConfig();
     fetchSessions();
+    fetchCategories();
   }, []);
+
+  // ── Classify job polling ────────────────────────────────────────────
+  useEffect(() => {
+    let timer = null;
+    async function poll() {
+      if (!clsJobId) return;
+      try {
+        const res = await fetch(`${API_BASE}/api/jobs/${clsJobId}`);
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || "Classify job polling failed");
+
+        setClsJob(data.job);
+        if (data.job.status === "completed") {
+          setClsResult(data.job.result || null);
+          setClsJobId(null);
+          fetchSessions();
+        } else if (data.job.status === "failed") {
+          setError(data.job.error || "Classify job failed");
+          setClsJobId(null);
+        } else {
+          timer = window.setTimeout(poll, 800);
+        }
+      } catch (err) {
+        setError(err.message || "Classify job polling failed");
+        setClsJobId(null);
+      }
+    }
+    if (clsJobId) poll();
+    return () => { if (timer) window.clearTimeout(timer); };
+  }, [clsJobId]);
+
+  // ── Classify apply job polling ─────────────────────────────────────────
+  useEffect(() => {
+    let timer = null;
+    async function poll() {
+      if (!clsApplyJobId) return;
+      try {
+        const res = await fetch(`${API_BASE}/api/jobs/${clsApplyJobId}`);
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || "Apply job polling failed");
+
+        setClsApplyJob(data.job);
+        if (data.job.status === "completed") {
+          setClsApplyJobId(null);
+          fetchSessions();
+        } else if (data.job.status === "failed") {
+          setError(data.job.error || "Apply job failed");
+          setClsApplyJobId(null);
+        } else {
+          timer = window.setTimeout(poll, 800);
+        }
+      } catch (err) {
+        setError(err.message || "Apply job polling failed");
+        setClsApplyJobId(null);
+      }
+    }
+    if (clsApplyJobId) poll();
+    return () => { if (timer) window.clearTimeout(timer); };
+  }, [clsApplyJobId]);
 
   useEffect(() => {
     let timer = null;
@@ -275,6 +375,39 @@ export default function App() {
     } finally {
       setConfigSaving(false);
     }
+  }
+
+  async function fetchCategories() {
+    try {
+      const res = await fetch(`${API_BASE}/api/categories`);
+      const data = await res.json();
+      if (data.ok) setClsCategories(data.categories || []);
+    } catch { /* non-blocking */ }
+  }
+
+  async function fetchPeople() {
+    try {
+      const res = await fetch(`${API_BASE}/api/people`);
+      const data = await res.json();
+      if (data.ok) setPeople(data.people || []);
+    } catch { /* non-blocking */ }
+  }
+
+  async function fetchFaceClusters() {
+    try {
+      const res = await fetch(`${API_BASE}/api/faces/unidentified?cluster=true`);
+      const data = await res.json();
+      if (data.ok) setFaceClusters(data.clusters || []);
+    } catch { /* non-blocking */ }
+  }
+
+  async function fetchReviewQueue() {
+    try {
+      const filterParam = reviewFilter !== "all" ? `?type=${reviewFilter}` : "";
+      const res = await fetch(`${API_BASE}/api/review-queue${filterParam}`);
+      const data = await res.json();
+      if (data.ok) setReviewQueue(data.items || []);
+    } catch { /* non-blocking */ }
   }
 
   async function fetchSessions() {
@@ -505,6 +638,164 @@ export default function App() {
     }
   }
 
+  // ── Classify functions ──────────────────────────────────────────────
+  function toggleCategory(catId) {
+    setClsCategories(prev => prev.map(c =>
+      c.id === catId ? { ...c, default_enabled: c.default_enabled ? 0 : 1 } : c
+    ));
+  }
+
+  async function startClassify(e) {
+    e.preventDefault();
+    setError("");
+    if (!clsSource.trim()) { setError("Source folder is required"); return; }
+
+    const enabledCats = clsCategories.filter(c => c.default_enabled).map(c => c.key);
+    const wizardConfig = {
+      enabled_categories: enabledCats,
+      folder_scheme: clsFolderScheme,
+      multi_category: clsMultiCategory,
+      face_sensitivity: clsFaceSensitivity,
+      confidence_threshold: Number(clsConfidence),
+      home_gps_lat: clsHomeLat,
+      home_gps_lon: clsHomeLon,
+    };
+
+    try {
+      const cfgRes = await fetch(`${API_BASE}/api/classify/config`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(wizardConfig),
+      });
+      const cfgData = await cfgRes.json();
+      if (!cfgData.ok) throw new Error(cfgData.error || "Config save failed");
+
+      const runId = cfgData.run_id;
+      setClsRunId(runId);
+
+      const startRes = await fetch(`${API_BASE}/api/classify/start`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ run_id: runId, source_dir: clsSource.trim() }),
+      });
+      const startData = await startRes.json();
+      if (!startData.ok) throw new Error(startData.error || "Failed to start classify");
+
+      setClsResult(null);
+      setClsJobId(startData.job_id);
+    } catch (err) {
+      setError(err.message || "Failed to start classify");
+    }
+  }
+
+  function getActiveStage(message) {
+    if (!message) return null;
+    const m = message.toLowerCase();
+    if (m.includes("stage a") || m.includes("exif")) return "EXIF";
+    if (m.includes("stage b") || m.includes("heuristic")) return "Heuristic";
+    if (m.includes("stage c") || m.includes("scene")) return "Scene";
+    if (m.includes("stage d") || m.includes("faces") || m.includes("face")) return "Faces";
+    if (m.includes("stage e") || m.includes("recognition") || m.includes("recogni")) return "Recognition";
+    if (m.includes("stage f") || m.includes("resolve")) return "Resolve";
+    return null;
+  }
+
+  async function startApply(e) {
+    e.preventDefault();
+    setError("");
+    if (!clsDest.trim()) { setError("Destination folder is required"); return; }
+    if (!clsRunId) { setError("No active classification run to apply"); return; }
+
+    try {
+      const res = await fetch(`${API_BASE}/api/classify/apply`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          run_id: clsRunId,
+          dest_dir: clsDest.trim(),
+          operation: clsOperation
+        }),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || "Failed to start apply");
+
+      setClsApplyJobId(data.job_id);
+    } catch (err) {
+      setError(err.message || "Failed to start apply");
+    }
+  }
+
+  // ── People functions ────────────────────────────────────────────────
+  async function addPerson(e) {
+    e.preventDefault();
+    if (!newPersonName.trim()) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/people`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newPersonName.trim() }),
+      });
+      const data = await res.json();
+      if (data.ok) { setNewPersonName(""); fetchPeople(); }
+    } catch { /* ignore */ }
+  }
+
+  async function removePerson(id) {
+    try {
+      await fetch(`${API_BASE}/api/people/${id}`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+      fetchPeople();
+    } catch { /* ignore */ }
+  }
+
+  async function assignCluster(clusterId, faces) {
+    const name = (clusterNames[clusterId] || "").trim();
+    if (!name || !faces?.length) return;
+    try {
+      // Create person, then assign all faces in the cluster
+      const personRes = await fetch(`${API_BASE}/api/people`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const personData = await personRes.json();
+      if (!personData.ok) return;
+      const personId = personData.person_id;
+
+      for (const face of faces) {
+        if (face.id) {
+          await fetch(`${API_BASE}/api/faces/${face.id}/assign`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ person_id: personId }),
+          });
+        }
+      }
+      setClusterNames(prev => ({ ...prev, [clusterId]: "" }));
+      fetchPeople();
+      fetchFaceClusters();
+    } catch { /* ignore */ }
+  }
+
+  // ── Review functions ────────────────────────────────────────────────
+  async function acceptReview(reviewId, categoryId) {
+    try {
+      await fetch(`${API_BASE}/api/review-queue/${reviewId}/resolve`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ category_id: categoryId }),
+      });
+      fetchReviewQueue();
+    } catch { /* ignore */ }
+  }
+
+  async function handlePurge() {
+    if (purgeConfirm !== "PURGE") { setError("Type PURGE to confirm"); return; }
+    setPurgeBusy(true);
+    try {
+      await fetch(`${API_BASE}/api/faces/purge`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm: "PURGE" }),
+      });
+      setPurgeConfirm("");
+      fetchPeople();
+      fetchFaceClusters();
+    } catch { /* ignore */ }
+    setPurgeBusy(false);
+  }
+
   async function revertSession(sessionId) {
     setUndoBusy(true);
     setError("");
@@ -582,7 +873,10 @@ export default function App() {
           <button className={`tab-btn ${activeTab === "duplicates" ? "active" : ""}`} onClick={() => setActiveTab("duplicates")}>Duplicates</button>
           <button className={`tab-btn ${activeTab === "organize" ? "active" : ""}`} onClick={() => setActiveTab("organize")}>Organize</button>
           <button className={`tab-btn ${activeTab === "compression" ? "active" : ""}`} onClick={() => setActiveTab("compression")}>Compression</button>
-          <button className={`tab-btn ${activeTab === "settings" ? "active" : ""}`} onClick={() => setActiveTab("settings")}>Sensitivity</button>
+          <button className={`tab-btn ${activeTab === "classify" ? "active" : ""}`} onClick={() => { setActiveTab("classify"); fetchCategories(); }}>Classify</button>
+          <button className={`tab-btn ${activeTab === "people" ? "active" : ""}`} onClick={() => { setActiveTab("people"); fetchPeople(); fetchFaceClusters(); }}>People</button>
+          <button className={`tab-btn ${activeTab === "review" ? "active" : ""}`} onClick={() => { setActiveTab("review"); fetchReviewQueue(); }}>Review</button>
+          <button className={`tab-btn ${activeTab === "settings" ? "active" : ""}`} onClick={() => setActiveTab("settings")}>Settings</button>
           <button className={`tab-btn ${activeTab === "undo" ? "active" : ""}`} onClick={() => setActiveTab("undo")}>Undo History</button>
         </div>
       </section>
@@ -859,6 +1153,260 @@ export default function App() {
         </section>
       ) : null}
 
+      {activeTab === "classify" ? (
+        <section className="panel">
+          <h2>Content-Based Classification</h2>
+          <form onSubmit={startClassify}>
+            <label>
+              Source folder
+              <div className="path-input-row">
+                <input type="text" value={clsSource} onChange={(e) => setClsSource(e.target.value)} placeholder="/path/to/photos" />
+                <button type="button" className="secondary browse-btn" onClick={() => pickFolder("cls_source", clsSource, setClsSource)} disabled={Boolean(clsJobId) || Boolean(pickerBusyKey)}>
+                  {pickerBusyKey === "cls_source" ? "Opening..." : "Select Folder"}
+                </button>
+              </div>
+            </label>
+
+            <h3 style={{ marginTop: 16, fontFamily: "'Space Grotesk', sans-serif" }}>Categories to detect</h3>
+            <div className="category-grid">
+              {clsCategories.map(cat => (
+                <label key={cat.id} className="category-toggle">
+                  <input type="checkbox" checked={Boolean(cat.default_enabled)} onChange={() => toggleCategory(cat.id)} />
+                  <span className="category-icon">{CATEGORY_ICONS[cat.key] || "📁"}</span>
+                  <span>{cat.label}</span>
+                </label>
+              ))}
+            </div>
+
+            <div className="wizard-grid">
+              <label>
+                Folder scheme
+                <select value={clsFolderScheme} onChange={(e) => setClsFolderScheme(e.target.value)}>
+                  <option value="yyyy_mm_category">YYYY/MM/Category</option>
+                  <option value="category_yyyy_mm">Category/YYYY/MM</option>
+                  <option value="flat_tags">Flat + Tags</option>
+                </select>
+              </label>
+              <label>
+                Multi-category handling
+                <select value={clsMultiCategory} onChange={(e) => setClsMultiCategory(e.target.value)}>
+                  <option value="tags">Tag-based (recommended)</option>
+                  <option value="symlink">Symlinks</option>
+                  <option value="primary">Primary category only</option>
+                </select>
+              </label>
+              <label>
+                Face recognition sensitivity
+                <select value={clsFaceSensitivity} onChange={(e) => setClsFaceSensitivity(e.target.value)}>
+                  <option value="strict">Strict (fewer matches)</option>
+                  <option value="balanced">Balanced</option>
+                  <option value="loose">Loose (more matches)</option>
+                </select>
+              </label>
+              <label>
+                Confidence threshold
+                <div className="confidence-slider">
+                  <input type="range" min="0.3" max="0.9" step="0.05" value={clsConfidence} onChange={(e) => setClsConfidence(e.target.value)} />
+                  <span className="value-label">{Number(clsConfidence).toFixed(2)}</span>
+                </div>
+              </label>
+              <label>
+                Home GPS Latitude
+                <input type="text" value={clsHomeLat} onChange={(e) => setClsHomeLat(e.target.value)} placeholder="e.g. 12.9716" />
+              </label>
+              <label>
+                Home GPS Longitude
+                <input type="text" value={clsHomeLon} onChange={(e) => setClsHomeLon(e.target.value)} placeholder="e.g. 77.5946" />
+              </label>
+            </div>
+
+            <div style={{ marginTop: 14 }}>
+              <button className="primary" type="submit" disabled={Boolean(clsJobId)}>
+                {clsJobId ? "Classifying…" : "Start Classification"}
+              </button>
+            </div>
+          </form>
+
+          <JobProgress title="Classification" job={clsJob} />
+
+          {clsJob && clsJob.status === "running" ? (
+            <div className="stage-progress">
+              {STAGE_NAMES.map(stage => {
+                const active = getActiveStage(clsJob.message);
+                const stageIdx = STAGE_NAMES.indexOf(stage);
+                const activeIdx = active ? STAGE_NAMES.indexOf(active) : -1;
+                let cls = "stage-step";
+                if (stageIdx < activeIdx) cls += " done";
+                else if (stage === active) cls += " active";
+                return <div key={stage} className={cls}>{stage}</div>;
+              })}
+            </div>
+          ) : null}
+
+          {clsResult ? (
+            <div className="result-panel">
+              <h3>Classification Summary</h3>
+              <div className="kv-grid">
+                <div><span>Total files</span><strong>{clsResult.total_files}</strong></div>
+                <div><span>Tags assigned</span><strong>{clsResult.tags_assigned}</strong></div>
+                <div><span>Needs review</span><strong>{clsResult.review_items}</strong></div>
+              </div>
+              {clsResult.categories_found && Object.keys(clsResult.categories_found).length > 0 ? (
+                <div className="results-chart">
+                  {Object.entries(clsResult.categories_found).sort((a, b) => b[1] - a[1]).map(([key, count]) => {
+                    const maxCount = Math.max(...Object.values(clsResult.categories_found));
+                    const pct = maxCount > 0 ? (count / maxCount) * 100 : 0;
+                    return (
+                      <div key={key} className="chart-row">
+                        <span className="chart-label">{CATEGORY_ICONS[key] || ""} {key}</span>
+                        <div className="chart-bar-wrap"><div className="chart-bar" style={{ width: `${pct}%` }} /></div>
+                        <span className="chart-count">{count}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : null}
+
+              <div style={{ marginTop: 24, paddingTop: 16, borderTop: "1px solid var(--line)" }}>
+                <h3>Apply Organization</h3>
+                <p className="subtle" style={{ marginBottom: 12 }}>
+                  Move or copy your classified files into physical folders based on your chosen scheme.
+                </p>
+                <form onSubmit={startApply}>
+                  <label>
+                    Destination folder
+                    <div className="path-input-row">
+                      <input type="text" value={clsDest} onChange={(e) => setClsDest(e.target.value)} placeholder="/path/to/destination" />
+                      <button type="button" className="secondary browse-btn" onClick={() => pickFolder("cls_dest", clsDest, setClsDest)} disabled={Boolean(clsApplyJobId) || Boolean(pickerBusyKey)}>
+                        {pickerBusyKey === "cls_dest" ? "Opening..." : "Select Folder"}
+                      </button>
+                    </div>
+                  </label>
+                  
+                  <label style={{ marginTop: 10 }}>
+                    Operation
+                    <select value={clsOperation} onChange={(e) => setClsOperation(e.target.value)}>
+                      <option value="move">Move files (faster, saves space)</option>
+                      <option value="copy">Copy files (safer, keeps original)</option>
+                    </select>
+                  </label>
+                  
+                  <div style={{ marginTop: 14 }}>
+                    <button className="primary" type="submit" disabled={Boolean(clsApplyJobId)}>
+                      {clsApplyJobId ? "Applying…" : "Apply Organization"}
+                    </button>
+                  </div>
+                </form>
+                <JobProgress title="Apply Organization" job={clsApplyJob} />
+              </div>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
+      {activeTab === "people" ? (
+        <section className="panel">
+          <h2>People Management</h2>
+
+          <form onSubmit={addPerson} className="new-person-row">
+            <label style={{ flex: 1 }}>
+              Add new person
+              <input type="text" value={newPersonName} onChange={(e) => setNewPersonName(e.target.value)} placeholder="Person name" />
+            </label>
+            <button className="primary" type="submit">Add Person</button>
+          </form>
+
+          {people.length > 0 ? (
+            <div className="people-grid">
+              {people.map(person => (
+                <div key={person.id} className="person-card">
+                  {person.cover_face_id ? (
+                    <img src={`${API_BASE}/api/face-crop?id=${person.cover_face_id}`} alt={person.name} />
+                  ) : (
+                    <div style={{ width: "100%", aspectRatio: 1, background: "#eaf0ef", display: "grid", placeItems: "center", fontSize: "2rem" }}>👤</div>
+                  )}
+                  <div className="person-name">{person.name}</div>
+                  <div className="person-actions">
+                    <button className="danger" onClick={() => removePerson(person.id)}>Remove</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : <div className="empty-state" style={{ marginTop: 12 }}>No known people yet. Run a classify job with face detection enabled, or add manually above.</div>}
+
+          <h3 style={{ marginTop: 24, fontFamily: "'Space Grotesk', sans-serif" }}>Unidentified Faces</h3>
+          <button onClick={fetchFaceClusters} style={{ marginBottom: 10 }}>Refresh Clusters</button>
+
+          {faceClusters.length === 0 ? (
+            <div className="empty-state">No unidentified face clusters. Run a classify job with face detection enabled.</div>
+          ) : (
+            <div className="face-clusters">
+              {faceClusters.map(cluster => (
+                <div key={cluster.id} className="face-cluster-card">
+                  <div className="face-cluster-preview">
+                    {cluster.faces.slice(0, 6).map(face => (
+                      <img key={face.id} src={`${API_BASE}/api/face-crop?id=${face.id}`} alt="face" />
+                    ))}
+                  </div>
+                  <div className="face-cluster-label">
+                    <span>{cluster.count} photo{cluster.count !== 1 ? "s" : ""}</span>
+                    <input
+                      type="text"
+                      placeholder="Who is this?"
+                      value={clusterNames[cluster.id] || ""}
+                      onChange={(e) => setClusterNames(prev => ({ ...prev, [cluster.id]: e.target.value }))}
+                    />
+                    <button className="primary" onClick={() => assignCluster(cluster.id, cluster.faces)}>Save</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      ) : null}
+
+      {activeTab === "review" ? (
+        <section className="panel">
+          <h2>Review Queue</h2>
+          <div className="review-filter-bar">
+            {["all", "scene", "document", "face"].map(f => (
+              <button
+                key={f}
+                className={reviewFilter === f ? "active" : ""}
+                onClick={() => { setReviewFilter(f); setTimeout(fetchReviewQueue, 50); }}
+              >
+                {f.charAt(0).toUpperCase() + f.slice(1)}
+              </button>
+            ))}
+          </div>
+
+          {reviewQueue.length === 0 ? (
+            <div className="empty-state">No items need review. Run a classify job to populate this queue.</div>
+          ) : (
+            <div className="review-grid">
+              {reviewQueue.map(item => (
+                <div key={item.id} className="review-card">
+                  <img src={imageUrl(item.path, "thumb")} alt={item.filename} />
+                  <div className="review-meta">
+                    {item.suggested_label ? <span className="suggested-tag">{item.suggested_label}</span> : null}
+                    <div className="review-confidence">Confidence: {((item.confidence || 0) * 100).toFixed(0)}%</div>
+                  </div>
+                  <div className="review-actions">
+                    {item.suggested_category_id ? (
+                      <button className="primary" onClick={() => acceptReview(item.id, item.suggested_category_id)}>Accept</button>
+                    ) : null}
+                    <select onChange={(e) => { if (e.target.value) acceptReview(item.id, Number(e.target.value)); e.target.value = ""; }}>
+                      <option value="">Reassign…</option>
+                      {clsCategories.map(cat => <option key={cat.id} value={cat.id}>{cat.label}</option>)}
+                    </select>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      ) : null}
+
       {activeTab === "settings" ? (
         <section className="panel">
           <h2>Duplicate Sensitivity Configuration</h2>
@@ -871,6 +1419,41 @@ export default function App() {
           </form>
           {configMessage ? <div className="ok-box">{configMessage}</div> : null}
           <p className="subtle">Lower values are stricter; higher values catch more near-duplicates.</p>
+
+          <details className="advanced-settings">
+            <summary>Category Settings (Advanced)</summary>
+            <div className="category-settings-grid">
+              {clsCategories.map(cat => (
+                <div key={cat.id} className="category-setting-row">
+                  <input type="checkbox" checked={Boolean(cat.default_enabled)} onChange={() => {
+                    fetch(`${API_BASE}/api/categories/${cat.id}`, {
+                      method: "PATCH", headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ enabled: !cat.default_enabled }),
+                    }).then(() => fetchCategories());
+                  }} />
+                  <span>{CATEGORY_ICONS[cat.key] || ""} {cat.label}</span>
+                  <input type="number" defaultValue={cat.priority} min={0} max={99} onBlur={(e) => {
+                    fetch(`${API_BASE}/api/categories/${cat.id}`, {
+                      method: "PATCH", headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ priority: Number(e.target.value) }),
+                    }).then(() => fetchCategories());
+                  }} />
+                </div>
+              ))}
+            </div>
+          </details>
+
+          <div className="danger-zone">
+            <h3>⚠️ Danger Zone</h3>
+            <p>Permanently delete all face embeddings and people data. Manual review tags will be preserved.</p>
+            <div className="purge-row">
+              <label>
+                Type PURGE to confirm
+                <input type="text" value={purgeConfirm} onChange={(e) => setPurgeConfirm(e.target.value)} placeholder="PURGE" />
+              </label>
+              <button className="danger" onClick={handlePurge} disabled={purgeBusy}>Purge All Face Data</button>
+            </div>
+          </div>
         </section>
       ) : null}
 

@@ -23,6 +23,28 @@ from src.organiser import organise_files
 from src.phash import get_backend
 from src.undo_manager import undo_manager
 
+# Classification module
+from src.classify.db import (
+    init_db,
+    get_categories,
+    get_classification_summary,
+    get_review_queue,
+    get_run_config,
+    get_people,
+    get_unidentified_faces,
+    save_run_config,
+    update_category,
+    create_person,
+    update_person,
+    delete_person,
+    merge_people,
+    assign_face_to_person,
+    resolve_review,
+    purge_face_data,
+)
+from src.classify.pipeline import run_classify_pipeline
+from src.classify.stage_face_recognize import cluster_unidentified_faces
+
 try:
     import pillow_heif
 
@@ -36,6 +58,14 @@ WEB_DIST = PROJECT_ROOT / "web" / "dist"
 TRASH_ROOT = PROJECT_ROOT / "logs" / "web_trash"
 
 app = Flask(__name__, static_folder=str(WEB_DIST), static_url_path="")
+
+# Initialise classification database (creates tables + seeds categories)
+try:
+    init_db()
+except Exception as exc:
+    logger.warning("Classification DB init deferred: %s", exc)
+
+FACE_CACHE_DIR = PROJECT_ROOT / "logs" / "face_cache"
 
 
 @dataclass
@@ -552,7 +582,7 @@ def _pick_folder_native(initial_dir: str | None = None) -> Path | None:
 def _after_request(response):
     response.headers["Access-Control-Allow-Origin"] = "*"
     response.headers["Access-Control-Allow-Headers"] = "Content-Type"
-    response.headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS"
+    response.headers["Access-Control-Allow-Methods"] = "GET,POST,PATCH,DELETE,OPTIONS"
     return response
 
 
@@ -868,6 +898,296 @@ def api_image():
     except Exception:
         # Fallback for files Pillow cannot decode through current codecs.
         return send_file(image_path)
+
+
+
+# ── Classification endpoints ──────────────────────────────────────────────
+
+
+def _classify_task(
+    progress: Callable[[int, str], None],
+    source_dir: str,
+    run_id: str,
+) -> dict[str, Any]:
+    source = Path(source_dir).expanduser().resolve()
+    if not source.exists() or not source.is_dir():
+        raise ValueError(f"Source directory not found: {source}")
+    _add_allowed_root(source)
+
+    config = get_run_config(run_id) or {}
+    result = run_classify_pipeline(str(source), run_id, config, progress)
+    return result
+
+
+@app.route("/api/classify/config", methods=["POST", "OPTIONS"])
+def api_classify_config():
+    if request.method == "OPTIONS":
+        return jsonify({"ok": True})
+
+    payload = request.get_json(silent=True) or {}
+    run_id = uuid.uuid4().hex
+    save_run_config(run_id, payload)
+    return jsonify({"ok": True, "run_id": run_id})
+
+
+@app.route("/api/classify/start", methods=["POST", "OPTIONS"])
+def api_classify_start():
+    if request.method == "OPTIONS":
+        return jsonify({"ok": True})
+
+    payload = request.get_json(silent=True) or {}
+    run_id = str(payload.get("run_id", "")).strip()
+    source_dir = str(payload.get("source_dir", "")).strip()
+
+    if not run_id:
+        return jsonify({"ok": False, "error": "run_id is required"}), 400
+    if not source_dir:
+        return jsonify({"ok": False, "error": "source_dir is required"}), 400
+
+    job_id = jobs.submit("classify", _classify_task, source_dir, run_id)
+    return jsonify({"ok": True, "job_id": job_id, "run_id": run_id})
+
+
+def _classify_apply_task(progress_cb, run_id, dest_dir, operation):
+    from src.classify.apply_org import apply_classification
+    try:
+        return apply_classification(run_id, dest_dir, operation, progress_cb)
+    except Exception as e:
+        logger.error(f"Classification apply failed: {e}")
+        return {"error": str(e)}
+
+
+@app.route("/api/classify/apply", methods=["POST", "OPTIONS"])
+def api_classify_apply():
+    if request.method == "OPTIONS":
+        return jsonify({"ok": True})
+
+    payload = request.get_json(silent=True) or {}
+    run_id = str(payload.get("run_id", "")).strip()
+    dest_dir = str(payload.get("dest_dir", "")).strip()
+    operation = str(payload.get("operation", "move")).strip().lower()
+
+    if not run_id:
+        return jsonify({"ok": False, "error": "run_id is required"}), 400
+    if not dest_dir:
+        return jsonify({"ok": False, "error": "dest_dir is required"}), 400
+    if operation not in ("move", "copy"):
+        return jsonify({"ok": False, "error": "operation must be move or copy"}), 400
+
+    job_id = jobs.submit("classify_apply", _classify_apply_task, run_id, dest_dir, operation)
+    return jsonify({"ok": True, "job_id": job_id})
+@app.route("/api/classify/results/<run_id>", methods=["GET"])
+def api_classify_results(run_id: str):
+    summary = get_classification_summary(run_id)
+    return jsonify({"ok": True, **summary})
+
+
+@app.route("/api/categories", methods=["GET"])
+def api_categories():
+    cats = get_categories()
+    return jsonify({"ok": True, "categories": cats})
+
+
+@app.route("/api/categories/<int:cat_id>", methods=["PATCH", "OPTIONS"])
+def api_update_category(cat_id: int):
+    if request.method == "OPTIONS":
+        return jsonify({"ok": True})
+
+    payload = request.get_json(silent=True) or {}
+    enabled = payload.get("enabled")
+    priority = payload.get("priority")
+
+    if enabled is not None:
+        enabled = bool(enabled)
+    if priority is not None:
+        try:
+            priority = int(priority)
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "priority must be an integer"}), 400
+
+    success = update_category(cat_id, enabled=enabled, priority=priority)
+    return jsonify({"ok": success, "categories": get_categories()})
+
+
+# ── People management ─────────────────────────────────────────────────────
+
+
+@app.route("/api/people", methods=["GET"])
+def api_list_people():
+    return jsonify({"ok": True, "people": get_people()})
+
+
+@app.route("/api/people", methods=["POST", "OPTIONS"])
+def api_create_person():
+    if request.method == "OPTIONS":
+        return jsonify({"ok": True})
+
+    payload = request.get_json(silent=True) or {}
+    name = str(payload.get("name", "")).strip()
+    if not name:
+        return jsonify({"ok": False, "error": "name is required"}), 400
+
+    cover_face_id = payload.get("cover_face_id")
+    person_id = create_person(name, cover_face_id)
+    return jsonify({"ok": True, "person_id": person_id})
+
+
+@app.route("/api/people/<int:person_id>", methods=["PATCH", "OPTIONS"])
+def api_update_person(person_id: int):
+    if request.method == "OPTIONS":
+        return jsonify({"ok": True})
+
+    payload = request.get_json(silent=True) or {}
+    name = payload.get("name")
+    merge_with = payload.get("merge_with")
+
+    if merge_with is not None:
+        try:
+            merge_people(person_id, int(merge_with))
+            return jsonify({"ok": True, "merged": True, "people": get_people()})
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
+    if name is not None:
+        update_person(person_id, str(name).strip())
+    return jsonify({"ok": True, "people": get_people()})
+
+
+@app.route("/api/people/<int:person_id>", methods=["DELETE", "OPTIONS"])
+def api_delete_person(person_id: int):
+    if request.method == "OPTIONS":
+        return jsonify({"ok": True})
+
+    payload = request.get_json(silent=True) or {}
+    purge = bool(payload.get("purge_embeddings", False))
+    delete_person(person_id, purge_embeddings=purge)
+    return jsonify({"ok": True, "people": get_people()})
+
+
+# ── Faces ──────────────────────────────────────────────────────────────────
+
+
+@app.route("/api/faces/unidentified", methods=["GET"])
+def api_unidentified_faces():
+    faces = get_unidentified_faces()
+    do_cluster = request.args.get("cluster", "false").lower() == "true"
+
+    if do_cluster and faces:
+        raw_clusters = cluster_unidentified_faces(faces)
+        clusters = []
+        for idx, cluster in enumerate(raw_clusters):
+            clusters.append({
+                "id": f"cluster_{idx}",
+                "count": len(cluster),
+                "faces": [
+                    {
+                        "id": f.get("id"),
+                        "file_id": f.get("file_id"),
+                        "path": f.get("path"),
+                        "filename": f.get("filename"),
+                        "bbox": f.get("bbox"),
+                        "confidence": f.get("confidence"),
+                    }
+                    for f in cluster
+                ],
+            })
+        return jsonify({"ok": True, "clusters": clusters, "total_faces": len(faces)})
+
+    return jsonify({
+        "ok": True,
+        "faces": [
+            {
+                "id": f.get("id"),
+                "file_id": f.get("file_id"),
+                "path": f.get("path"),
+                "filename": f.get("filename"),
+                "bbox": f.get("bbox"),
+                "confidence": f.get("confidence"),
+            }
+            for f in faces
+        ],
+    })
+
+
+@app.route("/api/faces/<int:face_id>/assign", methods=["POST", "OPTIONS"])
+def api_assign_face(face_id: int):
+    if request.method == "OPTIONS":
+        return jsonify({"ok": True})
+
+    payload = request.get_json(silent=True) or {}
+    person_id = payload.get("person_id")
+
+    if person_id is None:
+        return jsonify({"ok": False, "error": "person_id is required"}), 400
+
+    try:
+        assign_face_to_person(face_id, int(person_id))
+        return jsonify({"ok": True})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@app.route("/api/faces/purge", methods=["POST", "OPTIONS"])
+def api_purge_faces():
+    if request.method == "OPTIONS":
+        return jsonify({"ok": True})
+
+    payload = request.get_json(silent=True) or {}
+    confirm = str(payload.get("confirm", "")).strip()
+    if confirm != "PURGE":
+        return jsonify({"ok": False, "error": "Type PURGE to confirm"}), 400
+
+    result = purge_face_data()
+
+    # Also clear cached face crops
+    if FACE_CACHE_DIR.exists():
+        import shutil
+        shutil.rmtree(FACE_CACHE_DIR, ignore_errors=True)
+
+    return jsonify({"ok": True, **result})
+
+
+@app.route("/api/face-crop", methods=["GET"])
+def api_face_crop():
+    face_id = request.args.get("id", "")
+    if not face_id:
+        return jsonify({"ok": False, "error": "id is required"}), 400
+
+    crop_path = FACE_CACHE_DIR / f"face_{face_id}.jpg"
+    if crop_path.exists():
+        return send_file(crop_path, mimetype="image/jpeg")
+
+    return jsonify({"ok": False, "error": "Face crop not found"}), 404
+
+
+# ── Review queue ───────────────────────────────────────────────────────────
+
+
+@app.route("/api/review-queue", methods=["GET"])
+def api_review_queue():
+    review_type = request.args.get("type")
+    items = get_review_queue(review_type=review_type, resolved=False)
+    return jsonify({"ok": True, "items": items})
+
+
+@app.route("/api/review-queue/<int:review_id>/resolve", methods=["POST", "OPTIONS"])
+def api_resolve_review(review_id: int):
+    if request.method == "OPTIONS":
+        return jsonify({"ok": True})
+
+    payload = request.get_json(silent=True) or {}
+    category_id = payload.get("category_id")
+    if category_id is None:
+        return jsonify({"ok": False, "error": "category_id is required"}), 400
+
+    try:
+        success = resolve_review(review_id, int(category_id))
+        return jsonify({"ok": success})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+# ── Frontend catch-all ─────────────────────────────────────────────────────
 
 
 @app.route("/", defaults={"path": ""})
