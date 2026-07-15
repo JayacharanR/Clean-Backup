@@ -1388,8 +1388,14 @@ def serve_frontend(path: str):
     )
 
 
-def start_web_gui(host: str = "127.0.0.1", port: int = 5179, auto_open: bool = True) -> None:
-    url = f"http://{host}:{port}"
+def start_web_gui(host: str = "0.0.0.0", port: int = None, auto_open: bool = True) -> None:
+    if port is None:
+        port = int(os.environ.get("CLEAN_BACKUP_PORT", 8080))
+    # Note: host defaults to 0.0.0.0 to allow Docker binding
+    
+    # We display 127.0.0.1 in the terminal for clicking convenience
+    display_host = "127.0.0.1" if host == "0.0.0.0" else host
+    url = f"http://{display_host}:{port}"
     if auto_open:
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
 

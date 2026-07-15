@@ -18,7 +18,9 @@ from src.classify.category_config import CATEGORY_TAXONOMY
 from src.logger import logger
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-DB_PATH = PROJECT_ROOT / "clean_backup.db"
+_env_db_path = os.environ.get("CLEAN_BACKUP_DB_PATH")
+DB_PATH = Path(_env_db_path) if _env_db_path else PROJECT_ROOT / "clean_backup.db"
+
 
 _local = threading.local()
 

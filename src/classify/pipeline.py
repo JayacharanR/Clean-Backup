@@ -92,9 +92,21 @@ def run_classify_pipeline(
     progress_cb(5, f"Found {total_files} media files")
 
     # ── Load models ONCE ──────────────────────────────────────────────
-    scene_classifier = SceneClassifier()
-    face_detector = FaceDetector()
-    face_recognizer = FaceRecognizer()
+    import os
+    disable_ml = os.environ.get("CLEAN_BACKUP_DISABLE_ML", "0").lower() in ("1", "true", "yes")
+    
+    if disable_ml:
+        logger.info("CLEAN_BACKUP_DISABLE_ML is set. Skipping ML model initialization.")
+        # Dummy objects that mimic not-available status
+        class DummyModel:
+            available = False
+        scene_classifier = DummyModel()
+        face_detector = DummyModel()
+        face_recognizer = DummyModel()
+    else:
+        scene_classifier = SceneClassifier()
+        face_detector = FaceDetector()
+        face_recognizer = FaceRecognizer()
 
     # Pre-load known face embeddings for Stage E matching
     known_embeddings = db.get_all_known_embeddings() if face_recognizer.available else []

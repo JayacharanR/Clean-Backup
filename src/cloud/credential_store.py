@@ -20,7 +20,8 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 _SERVICE_NAME = "clean-backup-cloud"
-_KEY_DIR = Path.home() / ".clean-backup"
+_env_config_dir = os.environ.get("CLEAN_BACKUP_CONFIG_DIR")
+_KEY_DIR = Path(_env_config_dir) if _env_config_dir else Path.home() / ".clean-backup"
 _KEY_FILE = _KEY_DIR / "secret.key"
 
 # ── Detect available backend ──────────────────────────────────────────────

@@ -2,8 +2,19 @@
 
 **An intelligent, high-performance media organization automation tool featuring perceptual deduplication and hybrid Python-Rust architecture.**
 
-![Python](https://img.shields.io/badge/Python-3.10%2B-blue) ![Rust](https://img.shields.io/badge/Rust-Enabled-orange) ![License](https://img.shields.io/badge/License-MIT-green)
+![Python](https://img.shields.io/badge/Python-3.11%2B-blue) ![Rust](https://img.shields.io/badge/Rust-Enabled-orange) [![Docker](https://github.com/charan/clean-backup/actions/workflows/docker.yml/badge.svg)](https://github.com/charan/clean-backup/actions/workflows/docker.yml) ![License](https://img.shields.io/badge/License-MIT-green)
 
+## 🐳 Quickstart (Docker)
+
+Run the full stack (Rust hash engine + Python ML pipeline + React Web UI) locally with zero setup:
+
+```bash
+docker run -p 8080:8080 -v ~/Photos:/data/media ghcr.io/charan/clean-backup:latest
+```
+*Note: The media folder is mounted **read-write** so the app can deduplicate and organize your files. Always have a backup!*
+
+For persistent database and config storage, see the [`docker-compose.yml`](docker-compose.yml) setup.
+**Offline-first:** All machine learning models (ONNX) are baked into the image. Clean-Backup runs 100% offline and requires no cloud credentials to work.
 ## 📖 Overview
 
 **Clean-Backup** is a sophisticated CLI utility designed to solve the chaos of unorganized digital media libraries. Unlike traditional organizers that rely solely on file names or modification dates, Clean-Backup employs deep metadata extraction and **perceptual hashing algorithms** to intelligently sort, categorize, and deduplicate assets.
@@ -98,6 +109,10 @@ The project follows a modular architecture:
 *   **`src/web_app.py`**: Flask API server with background job manager and localhost GUI serving.
 *   **`web/src/App.jsx`**: React frontend orchestrating duplicates, organize, compression, settings, and undo pages.
 *   **`phash_rs/`**: Rust crate providing high-performance implementation of perceptual hashing algorithm (pHash using DCT).
+
+### Docker Deployment
+
+The official Docker image uses a **multi-stage build** to compile the Rust module and React frontend, resulting in a minimal Python 3.11 image. The image runs as a non-root user and requires no pre-installed dependencies on the host beyond Docker. Volume mounts ensure the SQLite database, application configuration, and all media are securely persisted on the host.
 
 ### Web API Surface (Phase 2)
 

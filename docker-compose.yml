@@ -1,0 +1,27 @@
+services:
+  clean-backup:
+    build: .
+    image: ghcr.io/charan/clean-backup:latest
+    ports:
+      - "${CLEAN_BACKUP_PORT:-8080}:8080"
+    volumes:
+      - ${MEDIA_PATH:-./photos}:/data/media
+      - clean-backup-db:/app/data/db
+      - clean-backup-cache:/app/data/cache
+      - clean-backup-config:/app/data/config
+    environment:
+      - CLEAN_BACKUP_MEDIA_PATH=/data/media
+      - CLEAN_BACKUP_DB_PATH=/app/data/db/clean_backup.sqlite
+      - CLEAN_BACKUP_CONFIG_DIR=/app/data/config
+      - CLEAN_BACKUP_LOG_LEVEL=${CLEAN_BACKUP_LOG_LEVEL:-info}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  clean-backup-db:
+  clean-backup-cache:
+  clean-backup-config:

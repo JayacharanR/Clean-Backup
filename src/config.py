@@ -2,7 +2,11 @@ import json
 import os
 from pathlib import Path
 
-CONFIG_FILE = Path("config.json")
+# Configuration directory from env var, defaulting to current working directory
+CONFIG_DIR = Path(os.environ.get("CLEAN_BACKUP_CONFIG_DIR", "."))
+CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+CONFIG_FILE = CONFIG_DIR / "config.json"
+
 DEFAULT_CONFIG = {
     "phash_threshold": 10
 }

@@ -10,9 +10,12 @@ def setup_logging():
     
     log_filename= os.path.join(log_folder,f"backup_{datetime.now().strftime('%Y%m%d')}.log")
     
+    log_level_str = os.environ.get("CLEAN_BACKUP_LOG_LEVEL", "INFO").upper()
+    log_level = getattr(logging, log_level_str, logging.INFO)
+
     logging.basicConfig(
         filename=log_filename,
-        level=logging.INFO,
+        level=log_level,
         # %levelname inserts the Severity Level of the log.
         # %asctime inserts the Timestamp.
         # %message inserts the actual message.
@@ -22,7 +25,7 @@ def setup_logging():
     
     #print log streams to console
     console= logging.StreamHandler()
-    console.setLevel(logging.INFO)
+    console.setLevel(log_level)
     logging.getLogger('').addHandler(console)
     
     return logging.getLogger(__name__)

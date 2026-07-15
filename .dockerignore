@@ -1,0 +1,30 @@
+.git
+.venv
+node_modules
+target
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Project specific
+web/node_modules
+web/dist
+clean_backup.db
+clean_backup.sqlite
+*.db
+*.db-shm
+*.db-wal
+config.json
+credentials.json
+.clean-backup/
+
+# Ignore media directories if running locally
+photos/
+test/

@@ -4,9 +4,19 @@ from src.organiser import organise_files, print_summary
 from src.duplicate_handler import handle_duplicates, print_duplicate_report
 from src.undo_manager import undo_manager
 from src.compressor import compress_files, print_compression_summary, get_compression_settings
+import sys
 import src.config
 
 def main():
+    if "--web" in sys.argv:
+        try:
+            from src.web_app import start_web_gui
+            start_web_gui(auto_open=False)
+            return
+        except Exception as e:
+            print(f"Failed to start Web GUI: {e}")
+            sys.exit(1)
+
     source = None
     destination = None
     current_threshold = src.config.get_threshold()
