@@ -162,11 +162,90 @@ export default function App() {
   const [purgeConfirm, setPurgeConfirm] = useState("");
   const [purgeBusy, setPurgeBusy] = useState(false);
 
+  // ── Cloud Sync state ────────────────────────────────────────────────
+  const [cloudAccounts, setCloudAccounts] = useState([]);
+  const [syncHistory, setSyncHistory] = useState([]);
+  const [syncSource, setSyncSource] = useState("");
+  const [syncRemotePath, setSyncRemotePath] = useState("Clean-Backup");
+  const [syncFolderScheme, setSyncFolderScheme] = useState("mirror");
+  const [syncType, setSyncType] = useState("incremental");
+  const [syncDuplicateHandling, setSyncDuplicateHandling] = useState("skip");
+  const [syncThrottleKb, setSyncThrottleKb] = useState("");
+  const [syncSelectedAccount, setSyncSelectedAccount] = useState("");
+  const [syncJobId, setSyncJobId] = useState(null);
+  const [syncJob, setSyncJob] = useState(null);
+  const [syncRunId, setSyncRunId] = useState(null);
+  const [syncConnecting, setSyncConnecting] = useState(false);
+  const [syncUndoJobId, setSyncUndoJobId] = useState(null);
+  const [syncUndoJob, setSyncUndoJob] = useState(null);
+  const [syncPromptVisible, setSyncPromptVisible] = useState(false);
+  const [syncPromptDismissed, setSyncPromptDismissed] = useState(false);
+
   useEffect(() => {
     fetchConfig();
     fetchSessions();
     fetchCategories();
+    fetchCloudAccounts();
   }, []);
+
+  // ── Cloud Sync job polling ──────────────────────────────────────────
+  useEffect(() => {
+    let timer = null;
+    async function poll() {
+      if (!syncJobId) return;
+      try {
+        const res = await fetch(`${API_BASE}/api/jobs/${syncJobId}`);
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || "Sync job polling failed");
+
+        setSyncJob(data.job);
+        if (data.job.status === "completed") {
+          setSyncJobId(null);
+          fetchSyncHistory();
+          fetchSessions();
+        } else if (data.job.status === "failed") {
+          setError(data.job.error || "Sync job failed");
+          setSyncJobId(null);
+        } else {
+          timer = window.setTimeout(poll, 800);
+        }
+      } catch (err) {
+        setError(err.message || "Sync job polling failed");
+        setSyncJobId(null);
+      }
+    }
+    if (syncJobId) poll();
+    return () => { if (timer) window.clearTimeout(timer); };
+  }, [syncJobId]);
+
+  // ── Cloud Undo job polling ──────────────────────────────────────────
+  useEffect(() => {
+    let timer = null;
+    async function poll() {
+      if (!syncUndoJobId) return;
+      try {
+        const res = await fetch(`${API_BASE}/api/jobs/${syncUndoJobId}`);
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || "Undo job polling failed");
+
+        setSyncUndoJob(data.job);
+        if (data.job.status === "completed") {
+          setSyncUndoJobId(null);
+          fetchSyncHistory();
+        } else if (data.job.status === "failed") {
+          setError(data.job.error || "Undo job failed");
+          setSyncUndoJobId(null);
+        } else {
+          timer = window.setTimeout(poll, 800);
+        }
+      } catch (err) {
+        setError(err.message || "Undo job polling failed");
+        setSyncUndoJobId(null);
+      }
+    }
+    if (syncUndoJobId) poll();
+    return () => { if (timer) window.clearTimeout(timer); };
+  }, [syncUndoJobId]);
 
   // ── Classify job polling ────────────────────────────────────────────
   useEffect(() => {
@@ -796,6 +875,125 @@ export default function App() {
     setPurgeBusy(false);
   }
 
+  // ── Cloud Sync functions ────────────────────────────────────────────
+  async function fetchCloudAccounts() {
+    try {
+      const res = await fetch(`${API_BASE}/api/cloud/accounts`);
+      const data = await res.json();
+      if (data.ok) setCloudAccounts(data.accounts || []);
+    } catch { /* ignore */ }
+  }
+
+  async function fetchSyncHistory() {
+    try {
+      const res = await fetch(`${API_BASE}/api/cloud/sync/history`);
+      const data = await res.json();
+      if (data.ok) setSyncHistory(data.runs || []);
+    } catch { /* ignore */ }
+  }
+
+  async function connectGoogleDrive() {
+    setSyncConnecting(true);
+    setError("");
+    try {
+      const res = await fetch(`${API_BASE}/api/cloud/accounts/gdrive/connect`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || "Failed to start OAuth");
+
+      // Open auth URL in a new tab
+      window.open(data.auth_url, "_blank");
+
+      // Poll for new account appearing
+      const pollInterval = setInterval(async () => {
+        const r = await fetch(`${API_BASE}/api/cloud/accounts`);
+        const d = await r.json();
+        if (d.ok && d.accounts.length > cloudAccounts.length) {
+          clearInterval(pollInterval);
+          setCloudAccounts(d.accounts);
+          setSyncConnecting(false);
+        }
+      }, 2000);
+
+      // Stop polling after 5 minutes
+      setTimeout(() => {
+        clearInterval(pollInterval);
+        setSyncConnecting(false);
+      }, 300000);
+    } catch (err) {
+      setError(err.message || "Failed to connect Google Drive");
+      setSyncConnecting(false);
+    }
+  }
+
+  async function disconnectCloudAccount(accountId) {
+    if (!confirm("Disconnect this cloud account? This will revoke access.")) return;
+    try {
+      await fetch(`${API_BASE}/api/cloud/accounts/${accountId}`, { method: "DELETE" });
+      fetchCloudAccounts();
+    } catch (err) {
+      setError(err.message || "Failed to disconnect account");
+    }
+  }
+
+  async function startCloudSync(e) {
+    e.preventDefault();
+    setError("");
+    if (!syncSelectedAccount) { setError("Select a cloud account"); return; }
+    if (!syncSource.trim()) { setError("Source folder is required"); return; }
+
+    try {
+      // Create config
+      const configRes = await fetch(`${API_BASE}/api/cloud/sync/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          account_id: Number(syncSelectedAccount),
+          source_dir: syncSource.trim(),
+          remote_path: syncRemotePath.trim() || "Clean-Backup",
+          folder_scheme: syncFolderScheme,
+          sync_type: syncType,
+          duplicate_handling: syncDuplicateHandling,
+          throttle_kb: Number(syncThrottleKb) || 0,
+        }),
+      });
+      const configData = await configRes.json();
+      if (!configData.ok) throw new Error(configData.error || "Failed to save config");
+
+      // Start sync job
+      const startRes = await fetch(`${API_BASE}/api/cloud/sync/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ run_id: configData.run_id }),
+      });
+      const startData = await startRes.json();
+      if (!startData.ok) throw new Error(startData.error || "Failed to start sync");
+
+      setSyncJobId(startData.job_id);
+      setSyncRunId(configData.run_id);
+    } catch (err) {
+      setError(err.message || "Failed to start cloud sync");
+    }
+  }
+
+  async function undoSyncRun(runId) {
+    if (!confirm("This will DELETE all uploaded files from the cloud. Local files are unaffected. Continue?")) return;
+    setError("");
+    try {
+      const res = await fetch(`${API_BASE}/api/cloud/sync/${runId}/undo`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || "Failed to start undo");
+      setSyncUndoJobId(data.job_id);
+    } catch (err) {
+      setError(err.message || "Failed to undo sync");
+    }
+  }
+
   async function revertSession(sessionId) {
     setUndoBusy(true);
     setError("");
@@ -876,6 +1074,7 @@ export default function App() {
           <button className={`tab-btn ${activeTab === "classify" ? "active" : ""}`} onClick={() => { setActiveTab("classify"); fetchCategories(); }}>Classify</button>
           <button className={`tab-btn ${activeTab === "people" ? "active" : ""}`} onClick={() => { setActiveTab("people"); fetchPeople(); fetchFaceClusters(); }}>People</button>
           <button className={`tab-btn ${activeTab === "review" ? "active" : ""}`} onClick={() => { setActiveTab("review"); fetchReviewQueue(); }}>Review</button>
+          <button className={`tab-btn ${activeTab === "cloud" ? "active" : ""}`} onClick={() => { setActiveTab("cloud"); fetchCloudAccounts(); fetchSyncHistory(); }}>Cloud Sync</button>
           <button className={`tab-btn ${activeTab === "settings" ? "active" : ""}`} onClick={() => setActiveTab("settings")}>Settings</button>
           <button className={`tab-btn ${activeTab === "undo" ? "active" : ""}`} onClick={() => setActiveTab("undo")}>Undo History</button>
         </div>
@@ -1454,6 +1653,140 @@ export default function App() {
               <button className="danger" onClick={handlePurge} disabled={purgeBusy}>Purge All Face Data</button>
             </div>
           </div>
+        </section>
+      ) : null}
+
+      {activeTab === "cloud" ? (
+        <section className="panel">
+          <h2>☁️ Cloud Sync</h2>
+          <p className="subtle">Push your organized files to Google Drive or AWS S3.</p>
+
+          {/* ── Connected Accounts ──────────────────────────────── */}
+          <div style={{ marginBottom: 24 }}>
+            <h3>Connected Accounts</h3>
+            {cloudAccounts.length === 0 ? (
+              <div className="empty-state">No cloud accounts connected yet.</div>
+            ) : (
+              <div className="cloud-accounts-grid">
+                {cloudAccounts.map(acc => (
+                  <div key={acc.id} className="cloud-account-card">
+                    <div className="cloud-account-icon">{acc.provider === "gdrive" ? "📁" : "☁️"}</div>
+                    <div className="cloud-account-info">
+                      <div className="cloud-account-label">{acc.label}</div>
+                      <div className="subtle">{acc.provider === "gdrive" ? "Google Drive" : "AWS S3"}</div>
+                    </div>
+                    <button className="danger small" onClick={() => disconnectCloudAccount(acc.id)}>Disconnect</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ marginTop: 12, display: "flex", gap: 10 }}>
+              <button className="primary" onClick={connectGoogleDrive} disabled={syncConnecting}>
+                {syncConnecting ? "Connecting…" : "Connect Google Drive"}
+              </button>
+              <button className="secondary" disabled title="Coming soon">
+                Connect AWS S3
+              </button>
+            </div>
+          </div>
+
+          {/* ── Sync Wizard ─────────────────────────────────────── */}
+          {cloudAccounts.length > 0 ? (
+            <div style={{ paddingTop: 16, borderTop: "1px solid var(--line)" }}>
+              <h3>Start a Sync</h3>
+              <form onSubmit={startCloudSync}>
+                <label>
+                  Account
+                  <select value={syncSelectedAccount} onChange={(e) => setSyncSelectedAccount(e.target.value)}>
+                    <option value="">Select account…</option>
+                    {cloudAccounts.map(acc => (
+                      <option key={acc.id} value={acc.id}>{acc.label} ({acc.provider === "gdrive" ? "Google Drive" : "S3"})</option>
+                    ))}
+                  </select>
+                </label>
+
+                <label>
+                  Source folder
+                  <div className="path-input-row">
+                    <input type="text" value={syncSource} onChange={(e) => setSyncSource(e.target.value)} placeholder="/path/to/organized/photos" />
+                    <button type="button" className="secondary browse-btn" onClick={() => pickFolder("sync_source", syncSource, setSyncSource)} disabled={Boolean(pickerBusyKey)}>
+                      {pickerBusyKey === "sync_source" ? "Opening..." : "Select Folder"}
+                    </button>
+                  </div>
+                </label>
+
+                <label>
+                  Remote destination path
+                  <input type="text" value={syncRemotePath} onChange={(e) => setSyncRemotePath(e.target.value)} placeholder="Clean-Backup" />
+                </label>
+
+                <label>
+                  Folder structure
+                  <select value={syncFolderScheme} onChange={(e) => setSyncFolderScheme(e.target.value)}>
+                    <option value="mirror">Mirror local folder structure</option>
+                    <option value="flat">Flat (all files in destination root)</option>
+                  </select>
+                </label>
+
+                <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+                  <label style={{ flex: 1, minWidth: 180 }}>
+                    Sync type
+                    <select value={syncType} onChange={(e) => setSyncType(e.target.value)}>
+                      <option value="incremental">Incremental (only new/changed)</option>
+                      <option value="full">Full re-upload</option>
+                    </select>
+                  </label>
+
+                  <label style={{ flex: 1, minWidth: 180 }}>
+                    Duplicate handling
+                    <select value={syncDuplicateHandling} onChange={(e) => setSyncDuplicateHandling(e.target.value)}>
+                      <option value="skip">Skip (if hash matches)</option>
+                      <option value="overwrite">Overwrite</option>
+                      <option value="rename">Rename with suffix</option>
+                    </select>
+                  </label>
+                </div>
+
+                <label>
+                  Bandwidth throttle (KB/s, 0 = unlimited)
+                  <input type="number" min="0" value={syncThrottleKb} onChange={(e) => setSyncThrottleKb(e.target.value)} placeholder="0" />
+                </label>
+
+                <div style={{ marginTop: 14 }}>
+                  <button className="primary" type="submit" disabled={Boolean(syncJobId) || !syncSelectedAccount}>
+                    {syncJobId ? "Syncing…" : "Start Sync"}
+                  </button>
+                </div>
+              </form>
+              <JobProgress title="Cloud Sync" job={syncJob} />
+            </div>
+          ) : null}
+
+          {/* ── Sync History ────────────────────────────────────── */}
+          {syncHistory.length > 0 ? (
+            <div style={{ marginTop: 24, paddingTop: 16, borderTop: "1px solid var(--line)" }}>
+              <h3>Sync History</h3>
+              <div className="session-list">
+                {syncHistory.map(run => (
+                  <div key={run.id} className="session-row">
+                    <div>
+                      <div className="session-id">
+                        {run.account_label || "Account"} — {run.started_at ? new Date(run.started_at).toLocaleString() : "Pending"}
+                      </div>
+                      <div className="subtle">
+                        <span className={`sync-status sync-status-${run.status}`}>{run.status}</span>
+                        {" · "}{run.uploaded || 0} uploaded, {run.skipped || 0} skipped, {run.failed || 0} failed
+                      </div>
+                    </div>
+                    {run.can_undo ? (
+                      <button className="danger" onClick={() => undoSyncRun(run.id)} disabled={Boolean(syncUndoJobId)}>Undo</button>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+              <JobProgress title="Undo Cloud Sync" job={syncUndoJob} />
+            </div>
+          ) : null}
         </section>
       ) : null}
 

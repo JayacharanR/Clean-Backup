@@ -1,0 +1,1 @@
+# Cloud sync provider abstraction

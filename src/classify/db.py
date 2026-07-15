@@ -107,6 +107,36 @@ CREATE TABLE IF NOT EXISTS review_queue (
     created_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (file_id) REFERENCES media_files(id)
 );
+
+CREATE TABLE IF NOT EXISTS cloud_accounts (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider        TEXT    NOT NULL,
+    label           TEXT    NOT NULL,
+    credential_ref  TEXT    NOT NULL,
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS sync_runs (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id      INTEGER NOT NULL,
+    config_json     TEXT    NOT NULL,
+    status          TEXT    DEFAULT 'pending',
+    started_at      TIMESTAMP,
+    completed_at    TIMESTAMP,
+    FOREIGN KEY (account_id) REFERENCES cloud_accounts(id)
+);
+
+CREATE TABLE IF NOT EXISTS sync_manifest (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    sync_run_id     INTEGER NOT NULL,
+    file_id         INTEGER,
+    local_path      TEXT    NOT NULL,
+    remote_path     TEXT    NOT NULL,
+    content_hash    TEXT,
+    uploaded_at     TIMESTAMP,
+    status          TEXT    DEFAULT 'pending',
+    FOREIGN KEY (sync_run_id) REFERENCES sync_runs(id)
+);
 """
 
 

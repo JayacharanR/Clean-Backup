@@ -1187,6 +1187,186 @@ def api_resolve_review(review_id: int):
         return jsonify({"ok": False, "error": str(exc)}), 400
 
 
+# ── Cloud Sync endpoints ───────────────────────────────────────────────────
+
+# In-memory OAuth flow cache (keyed by a random state token)
+_oauth_flows: dict[str, Any] = {}
+
+
+@app.route("/api/cloud/accounts", methods=["GET"])
+def api_cloud_accounts():
+    from src.cloud.manifest import list_cloud_accounts
+    return jsonify({"ok": True, "accounts": list_cloud_accounts()})
+
+
+@app.route("/api/cloud/accounts/gdrive/connect", methods=["POST", "OPTIONS"])
+def api_gdrive_connect():
+    if request.method == "OPTIONS":
+        return jsonify({"ok": True})
+
+    try:
+        from src.cloud.provider_gdrive import start_oauth_flow
+        # Build the redirect URI pointing back to our callback endpoint
+        host_url = request.host_url.rstrip("/")
+        redirect_uri = f"{host_url}/api/cloud/accounts/gdrive/callback"
+        auth_url, flow = start_oauth_flow(redirect_uri)
+
+        # Store flow in memory keyed by a state token
+        state = uuid.uuid4().hex
+        _oauth_flows[state] = flow
+        return jsonify({"ok": True, "auth_url": f"{auth_url}&state={state}", "state": state})
+    except FileNotFoundError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        logger.error("OAuth start failed: %s", exc)
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/api/cloud/accounts/gdrive/callback", methods=["GET"])
+def api_gdrive_callback():
+    """OAuth redirect handler — finishes the flow, stores credentials, creates account."""
+    from src.cloud.provider_gdrive import finish_oauth_flow, GoogleDriveProvider
+    from src.cloud import credential_store
+    from src.cloud.manifest import create_cloud_account
+
+    state = request.args.get("state", "")
+    flow = _oauth_flows.pop(state, None)
+    if not flow:
+        return "Invalid OAuth state. Please try connecting again.", 400
+
+    try:
+        token_data = finish_oauth_flow(flow, request.url)
+
+        # Get account label by authenticating
+        provider = GoogleDriveProvider()
+        auth = provider.authenticate({"token_json": token_data})
+        label = auth.account_label or "Google Drive"
+
+        # Store credentials securely
+        cred_ref = f"gdrive_{uuid.uuid4().hex[:8]}"
+        credential_store.store(cred_ref, token_data)
+
+        # Create DB record
+        account_id = create_cloud_account("gdrive", label, cred_ref)
+
+        # Redirect back to the web UI
+        return (
+            "<html><body><h2>✅ Google Drive connected!</h2>"
+            "<p>You can close this tab and return to Clean-Backup.</p>"
+            "<script>window.close();</script></body></html>"
+        )
+    except Exception as exc:
+        logger.error("OAuth callback failed: %s", exc)
+        return f"<html><body><h2>❌ Connection failed</h2><p>{exc}</p></body></html>", 500
+
+
+@app.route("/api/cloud/accounts/<int:account_id>", methods=["DELETE", "OPTIONS"])
+def api_cloud_disconnect(account_id: int):
+    if request.method == "OPTIONS":
+        return jsonify({"ok": True})
+
+    from src.cloud import credential_store
+    from src.cloud.manifest import get_cloud_account, delete_cloud_account
+
+    account = get_cloud_account(account_id)
+    if not account:
+        return jsonify({"ok": False, "error": "Account not found"}), 404
+
+    # Revoke token if Google Drive
+    if account["provider"] == "gdrive":
+        try:
+            from src.cloud.provider_gdrive import revoke_token
+            cred_data = credential_store.retrieve(account["credential_ref"])
+            if cred_data:
+                revoke_token(cred_data)
+        except Exception:
+            pass  # Best-effort revocation
+
+    # Delete stored credentials
+    credential_store.delete(account["credential_ref"])
+    delete_cloud_account(account_id)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/cloud/sync/config", methods=["POST", "OPTIONS"])
+def api_cloud_sync_config():
+    if request.method == "OPTIONS":
+        return jsonify({"ok": True})
+
+    from src.cloud.manifest import create_sync_run
+
+    payload = request.get_json(silent=True) or {}
+    account_id = payload.get("account_id")
+    if not account_id:
+        return jsonify({"ok": False, "error": "account_id is required"}), 400
+
+    run_id = create_sync_run(int(account_id), payload)
+    return jsonify({"ok": True, "run_id": run_id})
+
+
+def _cloud_sync_task(progress_cb, run_id):
+    from src.cloud.sync_pipeline import run_sync
+    try:
+        return run_sync(run_id, progress_cb)
+    except Exception as e:
+        logger.error(f"Cloud sync failed: {e}")
+        return {"error": str(e)}
+
+
+@app.route("/api/cloud/sync/start", methods=["POST", "OPTIONS"])
+def api_cloud_sync_start():
+    if request.method == "OPTIONS":
+        return jsonify({"ok": True})
+
+    payload = request.get_json(silent=True) or {}
+    run_id = payload.get("run_id")
+    if not run_id:
+        return jsonify({"ok": False, "error": "run_id is required"}), 400
+
+    job_id = jobs.submit("cloud_sync", _cloud_sync_task, int(run_id))
+    return jsonify({"ok": True, "job_id": job_id, "run_id": run_id})
+
+
+def _cloud_undo_task(progress_cb, run_id):
+    from src.cloud.sync_pipeline import undo_sync
+    try:
+        return undo_sync(run_id, progress_cb)
+    except Exception as e:
+        logger.error(f"Cloud sync undo failed: {e}")
+        return {"error": str(e)}
+
+
+@app.route("/api/cloud/sync/<int:run_id>/undo", methods=["POST", "OPTIONS"])
+def api_cloud_sync_undo(run_id: int):
+    if request.method == "OPTIONS":
+        return jsonify({"ok": True})
+
+    job_id = jobs.submit("cloud_undo", _cloud_undo_task, run_id)
+    return jsonify({"ok": True, "job_id": job_id})
+
+
+@app.route("/api/cloud/sync/history", methods=["GET"])
+def api_cloud_sync_history():
+    from src.cloud.manifest import list_sync_runs, get_run_stats, get_latest_run_for_account
+    runs = list_sync_runs()
+    # Annotate each run with stats and whether undo is allowed
+    result = []
+    latest_per_account: dict[int, int] = {}
+    for r in runs:
+        aid = r["account_id"]
+        if aid not in latest_per_account:
+            latest = get_latest_run_for_account(aid)
+            latest_per_account[aid] = latest["id"] if latest else -1
+
+        entry = {**r, **get_run_stats(r["id"])}
+        entry["can_undo"] = (
+            r["id"] == latest_per_account[aid]
+            and r["status"] in ("completed", "partial")
+        )
+        result.append(entry)
+    return jsonify({"ok": True, "runs": result})
+
+
 # ── Frontend catch-all ─────────────────────────────────────────────────────
 
 

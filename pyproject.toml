@@ -13,4 +13,8 @@ dependencies = [
     "onnxruntime>=1.17.0",
     "opencv-python-headless>=4.9.0",
     "numpy>=1.26.0",
+    "keyring>=25.0.0",
+    "cryptography>=42.0.0",
+    "google-auth-oauthlib>=1.2.0",
+    "google-api-python-client>=2.100.0",
 ]

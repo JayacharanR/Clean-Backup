@@ -1137,3 +1137,125 @@ button:disabled {
     align-items: flex-start;
   }
 }
+
+/* ── Cloud Sync ──────────────────────────────────────────────────────── */
+
+.cloud-accounts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.cloud-account-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  transition: box-shadow 0.2s ease;
+}
+
+.cloud-account-card:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+}
+
+.cloud-account-icon {
+  font-size: 1.8rem;
+  line-height: 1;
+}
+
+.cloud-account-info {
+  flex: 1;
+}
+
+.cloud-account-label {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--ink);
+}
+
+button.small {
+  padding: 5px 10px;
+  font-size: 0.78rem;
+}
+
+.sync-status {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.sync-status-completed {
+  background: rgba(13, 127, 116, 0.12);
+  color: #0d7f74;
+}
+
+.sync-status-partial {
+  background: rgba(230, 160, 40, 0.14);
+  color: #b07d10;
+}
+
+.sync-status-failed {
+  background: rgba(206, 75, 47, 0.12);
+  color: var(--accent-2);
+}
+
+.sync-status-running,
+.sync-status-pending {
+  background: rgba(13, 127, 116, 0.08);
+  color: var(--muted);
+}
+
+.sync-status-undone {
+  background: rgba(95, 108, 112, 0.1);
+  color: var(--muted);
+}
+
+.sync-prompt-banner {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  max-width: 420px;
+  padding: 18px 20px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  z-index: 200;
+  animation: slideUp 0.3s ease;
+}
+
+.sync-prompt-banner h4 {
+  margin: 0 0 8px;
+  font-family: "Space Grotesk", sans-serif;
+}
+
+.sync-prompt-banner p {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.sync-prompt-actions {
+  display: flex;
+  gap: 8px;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
