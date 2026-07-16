@@ -200,6 +200,7 @@ def organise_files(
     duplicate_threshold=THRESHOLD_SIMILAR,
     check_name_duplicates=False,
     progress_callback=None,
+    target_files: list[str] | None = None,
 ):
     """
     Organize media files into year/month folders.
@@ -212,6 +213,7 @@ def organise_files(
         duplicate_threshold: Hamming distance threshold for duplicate detection
         check_name_duplicates: If True, detect and skip files with duplicate naming patterns (e.g., photo(1).jpg)
         progress_callback: Optional callback(completed, total, result_dict) invoked per processed file
+        target_files: Optional list of specific absolute file paths to organize. If provided, only these files are processed.
     """
     src_path = Path(src_dir)
     dest_path = Path(dest_dir)
@@ -232,11 +234,16 @@ def organise_files(
         'folders_created': defaultdict(int)  # {"2022/November": count}
     }
     
+    # Gather files
+    if target_files:
+        all_files = [Path(f) for f in target_files]
+    else:
+        all_files = list(src_path.rglob('*'))
+    
     # Name-based duplicate detection (if enabled)
     name_duplicate_files = set()
     if check_name_duplicates:
         logger.info("Scanning for name-based duplicates (e.g., photo(1).jpg)...")
-        all_files = list(src_path.rglob('*'))
         name_duplicate_files = detect_name_based_duplicates(all_files)
         stats['name_duplicates'] = len(name_duplicate_files)
         logger.info(f"Found {len(name_duplicate_files)} name-based duplicates")
@@ -248,7 +255,7 @@ def organise_files(
         
         # Collect source images
         src_images = []
-        for p in src_path.rglob('*'):
+        for p in all_files:
             if p.is_file() and p.suffix.lower() in constants.IMAGE_EXTENSIONS:
                 src_images.append(str(p.resolve()))
 
@@ -292,7 +299,7 @@ def organise_files(
     
     # Collect all files to process
     file_list = []
-    for file_path in src_path.rglob('*'):
+    for file_path in all_files:
         if file_path.is_file():
             stats['total_scanned'] += 1
             file_list.append(file_path)

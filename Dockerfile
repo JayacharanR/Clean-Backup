@@ -1,5 +1,5 @@
 # ── Stage 1: Rust Builder ───────────────────────────────────────────────
-FROM rust:1.80-slim as rust-builder
+FROM rust:slim as rust-builder
 
 WORKDIR /build
 # Install build dependencies if needed (e.g. for maturin or setuptools-rust)
@@ -25,7 +25,7 @@ COPY web/ ./
 RUN npm run build
 
 # ── Stage 3: Python Runtime ─────────────────────────────────────────────
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 

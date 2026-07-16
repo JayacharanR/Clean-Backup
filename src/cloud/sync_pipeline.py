@@ -79,6 +79,7 @@ def _collect_files(source_dir: str) -> list[Path]:
 def run_sync(
     run_id: int,
     progress_cb: Callable[[int, str], None] | None = None,
+    target_files: list[str] | None = None,
 ) -> dict[str, Any]:
     """
     Execute a cloud sync run.
@@ -134,7 +135,11 @@ def run_sync(
         update_sync_run(run_id, status="failed", completed_at=datetime.now().isoformat())
         raise ValueError("No source directory specified")
 
-    all_files = _collect_files(source_dir)
+    if target_files:
+        all_files = [Path(f) for f in target_files]
+    else:
+        all_files = _collect_files(source_dir)
+        
     if not all_files:
         update_sync_run(run_id, status="completed", completed_at=datetime.now().isoformat())
         return {"total": 0, "uploaded": 0, "skipped": 0, "failed": 0}

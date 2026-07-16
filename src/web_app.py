@@ -1403,7 +1403,21 @@ def start_web_gui(host: str = "0.0.0.0", port: int = None, auto_open: bool = Tru
     print(f"Starting server at: {url}")
     print("Press Ctrl+C to stop and return to CLI.")
 
+    try:
+        from src.watcher.api import watcher_bp
+        from src.watcher.daemon import daemon
+        app.register_blueprint(watcher_bp)
+        daemon.start()
+    except Exception as e:
+        logger.error(f"Failed to start watcher daemon: {e}")
+
     app.run(host=host, port=port, debug=False, use_reloader=False)
+
+    try:
+        from src.watcher.daemon import daemon
+        daemon.stop()
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":

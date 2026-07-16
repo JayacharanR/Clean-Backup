@@ -45,6 +45,7 @@ def run_classify_pipeline(
     run_id: str,
     config: dict,
     progress_cb: Callable[[int, str], None],
+    target_files: list[str] | None = None,
 ) -> dict[str, Any]:
     """
     Run the full classification pipeline on *source_dir*.
@@ -54,6 +55,7 @@ def run_classify_pipeline(
         run_id: Unique run identifier (matches undo session + config).
         config: Wizard configuration dict (enabled categories, thresholds, etc.).
         progress_cb: ``(percent: int, message: str)`` callback for job status.
+        target_files: Optional list of absolute paths to specific files to process.
 
     Returns:
         Summary dict with tag counts, file totals, and review-queue size.
@@ -78,7 +80,13 @@ def run_classify_pipeline(
     # ── Collect files ─────────────────────────────────────────────────
     progress_cb(2, "Scanning directory")
     all_files: list[Path] = []
-    for p in sorted(source.rglob("*")):
+    
+    if target_files:
+        paths_to_check = [Path(f) for f in target_files]
+    else:
+        paths_to_check = sorted(source.rglob("*"))
+        
+    for p in paths_to_check:
         if p.is_file():
             ext = p.suffix.lower()
             if ext in IMAGE_EXTENSIONS or ext in VIDEO_EXTENSIONS:

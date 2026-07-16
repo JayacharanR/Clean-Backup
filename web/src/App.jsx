@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import WatcherSettings from "./components/WatcherSettings";
 
 const API_BASE = "";
 
@@ -1075,6 +1076,7 @@ export default function App() {
           <button className={`tab-btn ${activeTab === "people" ? "active" : ""}`} onClick={() => { setActiveTab("people"); fetchPeople(); fetchFaceClusters(); }}>People</button>
           <button className={`tab-btn ${activeTab === "review" ? "active" : ""}`} onClick={() => { setActiveTab("review"); fetchReviewQueue(); }}>Review</button>
           <button className={`tab-btn ${activeTab === "cloud" ? "active" : ""}`} onClick={() => { setActiveTab("cloud"); fetchCloudAccounts(); fetchSyncHistory(); }}>Cloud Sync</button>
+          <button className={`tab-btn ${activeTab === "watchers" ? "active" : ""}`} onClick={() => setActiveTab("watchers")}>Watchers</button>
           <button className={`tab-btn ${activeTab === "settings" ? "active" : ""}`} onClick={() => setActiveTab("settings")}>Settings</button>
           <button className={`tab-btn ${activeTab === "undo" ? "active" : ""}`} onClick={() => setActiveTab("undo")}>Undo History</button>
         </div>
@@ -1604,6 +1606,9 @@ export default function App() {
             </div>
           )}
         </section>
+      ) : null}
+      {activeTab === "watchers" ? (
+        <WatcherSettings />
       ) : null}
 
       {activeTab === "settings" ? (

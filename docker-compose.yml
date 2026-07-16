@@ -1,6 +1,8 @@
 services:
   clean-backup:
-    build: .
+    build:
+      context: .
+      network: host
     image: ghcr.io/charan/clean-backup:latest
     ports:
       - "${CLEAN_BACKUP_PORT:-8080}:8080"
