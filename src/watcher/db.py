@@ -192,11 +192,29 @@ def add_event(watcher_config_id: int, file_path: str, status: str = "stabilizing
     return cur.lastrowid
 
 
-def update_event(event_id: int, status: str, triggered_job_id: str | None = None, error_message: str | None = None) -> None:
+def update_event(
+    event_id: int,
+    status: str,
+    triggered_job_id: str | None = None,
+    error_message: str | None = None,
+) -> None:
+    """Update an event row.  Only overwrites triggered_job_id / error_message
+    when they are explicitly passed (not None)."""
     conn = _get_conn()
+    set_clauses = ["status = ?"]
+    values: list[Any] = [status]
+
+    if triggered_job_id is not None:
+        set_clauses.append("triggered_job_id = ?")
+        values.append(triggered_job_id)
+    if error_message is not None:
+        set_clauses.append("error_message = ?")
+        values.append(error_message)
+
+    values.append(event_id)
     conn.execute(
-        "UPDATE watcher_events SET status = ?, triggered_job_id = ?, error_message = ? WHERE id = ?",
-        (status, triggered_job_id, error_message, event_id),
+        f"UPDATE watcher_events SET {', '.join(set_clauses)} WHERE id = ?",
+        values,
     )
     conn.commit()
 
@@ -232,22 +250,6 @@ def get_events(limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
     return events
 
 
-def get_unprocessed_files(watcher_config_id: int, watch_path: str) -> list[str]:
-    """Find files in the directory that haven't been completed/ignored by this watcher."""
-    conn = _get_conn()
-    cur = conn.execute(
-        """
-        SELECT file_path FROM watcher_events 
-        WHERE watcher_config_id = ? AND status IN ('completed', 'ignored')
-        """,
-        (watcher_config_id,)
-    )
-    processed_paths = {row["file_path"] for row in cur}
-    
-    # Do a scan of the watch_path (non-recursive for now, or recursive depending on config)
-    # The actual daemon handles the globbing, so maybe this function shouldn't glob, 
-    # but just return the set of processed paths to the daemon to diff against.
-    pass
 
 def get_processed_paths(watcher_config_id: int) -> set[str]:
     """Return all file paths that have already been fully processed or ignored."""

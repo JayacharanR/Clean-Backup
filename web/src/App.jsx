@@ -89,6 +89,7 @@ function PreviewModal({ group, index, onClose, onPrev, onNext }) {
 export default function App() {
   const [activeTab, setActiveTab] = useState("duplicates");
   const [error, setError] = useState("");
+  const [demoMode, setDemoMode] = useState(false);
 
   const [configThreshold, setConfigThreshold] = useState(5);
   const [configSaving, setConfigSaving] = useState(false);
@@ -187,6 +188,11 @@ export default function App() {
     fetchSessions();
     fetchCategories();
     fetchCloudAccounts();
+    // Fetch demo mode flag
+    fetch(`${API_BASE}/api/health`)
+      .then(r => r.json())
+      .then(d => { if (d.demo_mode) setDemoMode(true); })
+      .catch(() => {});
   }, []);
 
   // ── Cloud Sync job polling ──────────────────────────────────────────
@@ -1062,6 +1068,13 @@ export default function App() {
     <div className="page-shell">
       <div className="orb orb-a" />
       <div className="orb orb-b" />
+
+      {demoMode && (
+        <div className="demo-banner">
+          <span>🔒 You're viewing a <strong>read-only demo</strong> with sample data. Actions that modify files are disabled.</span>
+          <a href="https://github.com/JayacharanR/Clean-Backup" target="_blank" rel="noopener noreferrer">Clone the repo →</a>
+        </div>
+      )}
 
       <header className="hero">
         <h1>Clean-Backup</h1>

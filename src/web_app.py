@@ -22,6 +22,7 @@ from src.logger import logger
 from src.organiser import organise_files
 from src.phash import get_backend
 from src.undo_manager import undo_manager
+from src.demo import demo_guard, is_demo_mode
 
 # Classification module
 from src.classify.db import (
@@ -593,6 +594,7 @@ def api_health():
             "ok": True,
             "backend": get_backend(),
             "default_threshold": get_threshold(),
+            "demo_mode": is_demo_mode(),
         }
     )
 
@@ -604,6 +606,10 @@ def api_config():
 
     if request.method == "GET":
         return jsonify({"ok": True, "config": load_config()})
+
+    blocked = demo_guard()
+    if blocked:
+        return blocked
 
     payload = request.get_json(silent=True) or {}
     threshold_raw = payload.get("phash_threshold")
@@ -652,6 +658,10 @@ def api_start_organize():
     if request.method == "OPTIONS":
         return jsonify({"ok": True})
 
+    blocked = demo_guard()
+    if blocked:
+        return blocked
+
     payload = request.get_json(silent=True) or {}
     source_dir = str(payload.get("source_dir", "")).strip()
     destination_dir = str(payload.get("destination_dir", "")).strip()
@@ -687,6 +697,10 @@ def api_start_organize():
 def api_start_compress():
     if request.method == "OPTIONS":
         return jsonify({"ok": True})
+
+    blocked = demo_guard()
+    if blocked:
+        return blocked
 
     payload = request.get_json(silent=True) or {}
     source_dir = str(payload.get("source_dir", "")).strip()
@@ -740,6 +754,10 @@ def api_pick_folder():
     if request.method == "OPTIONS":
         return jsonify({"ok": True})
 
+    blocked = demo_guard()
+    if blocked:
+        return blocked
+
     payload = request.get_json(silent=True) or {}
     initial_dir = str(payload.get("initial_dir", "")).strip() or None
 
@@ -759,6 +777,10 @@ def api_pick_folder():
 def api_delete_selected():
     if request.method == "OPTIONS":
         return jsonify({"ok": True})
+
+    blocked = demo_guard()
+    if blocked:
+        return blocked
 
     payload = request.get_json(silent=True) or {}
     selected_images = payload.get("selected_images") or []
@@ -841,6 +863,10 @@ def api_undo_sessions():
 def api_undo_revert():
     if request.method == "OPTIONS":
         return jsonify({"ok": True})
+
+    blocked = demo_guard()
+    if blocked:
+        return blocked
 
     payload = request.get_json(silent=True) or {}
     session_id = payload.get("session_id")
@@ -962,6 +988,10 @@ def api_classify_apply():
     if request.method == "OPTIONS":
         return jsonify({"ok": True})
 
+    blocked = demo_guard()
+    if blocked:
+        return blocked
+
     payload = request.get_json(silent=True) or {}
     run_id = str(payload.get("run_id", "")).strip()
     dest_dir = str(payload.get("dest_dir", "")).strip()
@@ -1058,6 +1088,10 @@ def api_delete_person(person_id: int):
     if request.method == "OPTIONS":
         return jsonify({"ok": True})
 
+    blocked = demo_guard()
+    if blocked:
+        return blocked
+
     payload = request.get_json(silent=True) or {}
     purge = bool(payload.get("purge_embeddings", False))
     delete_person(person_id, purge_embeddings=purge)
@@ -1131,6 +1165,10 @@ def api_assign_face(face_id: int):
 def api_purge_faces():
     if request.method == "OPTIONS":
         return jsonify({"ok": True})
+
+    blocked = demo_guard()
+    if blocked:
+        return blocked
 
     payload = request.get_json(silent=True) or {}
     confirm = str(payload.get("confirm", "")).strip()
@@ -1265,6 +1303,10 @@ def api_cloud_disconnect(account_id: int):
     if request.method == "OPTIONS":
         return jsonify({"ok": True})
 
+    blocked = demo_guard()
+    if blocked:
+        return blocked
+
     from src.cloud import credential_store
     from src.cloud.manifest import get_cloud_account, delete_cloud_account
 
@@ -1318,6 +1360,10 @@ def api_cloud_sync_start():
     if request.method == "OPTIONS":
         return jsonify({"ok": True})
 
+    blocked = demo_guard()
+    if blocked:
+        return blocked
+
     payload = request.get_json(silent=True) or {}
     run_id = payload.get("run_id")
     if not run_id:
@@ -1340,6 +1386,10 @@ def _cloud_undo_task(progress_cb, run_id):
 def api_cloud_sync_undo(run_id: int):
     if request.method == "OPTIONS":
         return jsonify({"ok": True})
+
+    blocked = demo_guard()
+    if blocked:
+        return blocked
 
     job_id = jobs.submit("cloud_undo", _cloud_undo_task, run_id)
     return jsonify({"ok": True, "job_id": job_id})
@@ -1410,6 +1460,16 @@ def start_web_gui(host: str = "0.0.0.0", port: int = None, auto_open: bool = Tru
         daemon.start()
     except Exception as e:
         logger.error(f"Failed to start watcher daemon: {e}")
+
+    # Demo mode: seed data and start auto-reset scheduler
+    if is_demo_mode():
+        try:
+            from deploy.demo.seed_demo_db import seed
+            seed()
+            from deploy.demo.reset_demo import start_reset_scheduler
+            start_reset_scheduler()
+        except Exception as e:
+            logger.warning(f"Demo seed/reset setup: {e}")
 
     app.run(host=host, port=port, debug=False, use_reloader=False)
 

@@ -1,5 +1,5 @@
 # ── Stage 1: Rust Builder ───────────────────────────────────────────────
-FROM rust:slim as rust-builder
+FROM rust:slim AS rust-builder
 
 WORKDIR /build
 # Install build dependencies if needed (e.g. for maturin or setuptools-rust)
@@ -13,7 +13,7 @@ RUN pip install maturin --break-system-packages
 RUN maturin build --release -o dist
 
 # ── Stage 2: Frontend Builder ───────────────────────────────────────────
-FROM node:20-slim as frontend-builder
+FROM node:20-slim AS frontend-builder
 
 WORKDIR /build/web
 # Copy package manifests first for caching
@@ -36,7 +36,7 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy python dependencies list and install
+# Copy python dependencies list and install (cached until requirements.txt changes)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
@@ -44,16 +44,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY --from=rust-builder /build/phash_rs/dist/*.whl /tmp/
 RUN pip install --no-cache-dir /tmp/*.whl && rm -f /tmp/*.whl
 
-# Download ONNX models so they are baked into the image
-# This ensures full offline capability without runtime downloads
-COPY src/classify/models/download_models.py src/classify/models/
-RUN python src/classify/models/download_models.py
+# Copy application source BEFORE model download so models aren't overwritten
+COPY . .
 
-# Copy frontend static build from Stage 2
+# Copy frontend static build from Stage 2 (overwrites the source web/dist)
 COPY --from=frontend-builder /build/web/dist ./web/dist
 
-# Copy the rest of the application source
-COPY . .
+# Download ONNX models — runs AFTER COPY . . so models persist in the layer
+RUN python src/classify/models/download_models.py
 
 # Set up non-root user
 RUN useradd -m -u 1000 appuser \

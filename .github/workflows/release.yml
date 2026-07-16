@@ -1,10 +1,8 @@
-name: Docker Build & Publish
+name: Release — Docker Build & Publish
 
 on:
   push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+    tags: ["v*"]
   release:
     types: [published]
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from "react";
 
 const API_BASE = "";
 
@@ -6,27 +6,25 @@ export default function WatcherSettings() {
   const [watchers, setWatchers] = useState([]);
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
 
-  // Form state for a new watcher
-  const [label, setLabel] = useState('');
-  const [watchPath, setWatchPath] = useState('');
-  const [pipelineStep, setPipelineStep] = useState('classify');
+  // Form state
+  const [label, setLabel] = useState("");
+  const [watchPath, setWatchPath] = useState("");
+  const [pipelineStep, setPipelineStep] = useState("classify");
   const [pipeline, setPipeline] = useState([]);
 
-  useEffect(() => {
-    fetchWatchers();
-  }, []);
+  useEffect(() => { fetchWatchers(); }, []);
 
   const fetchWatchers = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/watchers`);
-      if (!res.ok) throw new Error('Failed to fetch');
+      if (!res.ok) throw new Error("fetch failed");
       const data = await res.json();
       setWatchers(data.watchers || []);
       setEvents(data.events || []);
-    } catch (err) {
-      setError('Failed to fetch watchers.');
+    } catch {
+      setError("Failed to fetch watchers.");
     } finally {
       setLoading(false);
     }
@@ -35,24 +33,21 @@ export default function WatcherSettings() {
   const handleAddWatcher = async (e) => {
     e.preventDefault();
     if (!watchPath.trim()) return alert("Watch path is required");
-
     try {
       const res = await fetch(`${API_BASE}/api/watchers`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          label: label || 'New Watcher',
+          label: label || "New Watcher",
           watch_path: watchPath,
-          pipeline: pipeline,
+          pipeline,
           enabled: true,
           recursive: true,
           stability_window_seconds: 3,
         }),
       });
-      if (!res.ok) throw new Error('Failed to create watcher');
-      setLabel('');
-      setWatchPath('');
-      setPipeline([]);
+      if (!res.ok) throw new Error("create failed");
+      setLabel(""); setWatchPath(""); setPipeline([]);
       fetchWatchers();
     } catch (err) {
       alert(err.message || "Failed to create watcher");
@@ -63,209 +58,147 @@ export default function WatcherSettings() {
     setPipeline([...pipeline, { job_type: pipelineStep, enabled: true }]);
   };
 
-  const removePipelineStep = (index) => {
-    setPipeline(pipeline.filter((_, i) => i !== index));
+  const removePipelineStep = (idx) => {
+    setPipeline(pipeline.filter((_, i) => i !== idx));
   };
 
   const toggleWatcher = async (id, currentEnabled) => {
     try {
-      const res = await fetch(`${API_BASE}/api/watchers/${id}/${currentEnabled ? 'stop' : 'start'}`, {
-        method: 'POST',
-      });
-      if (!res.ok) throw new Error('Failed to toggle');
+      await fetch(`${API_BASE}/api/watchers/${id}/${currentEnabled ? "stop" : "start"}`, { method: "POST" });
       fetchWatchers();
-    } catch (err) {
-      alert("Failed to toggle watcher");
-    }
+    } catch { alert("Failed to toggle watcher"); }
   };
 
   const deleteWatcher = async (id) => {
     if (!window.confirm("Delete this watcher?")) return;
     try {
-      const res = await fetch(`${API_BASE}/api/watchers/${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('Failed to delete');
+      await fetch(`${API_BASE}/api/watchers/${id}`, { method: "DELETE" });
       fetchWatchers();
-    } catch (err) {
-      alert("Failed to delete watcher");
-    }
+    } catch { alert("Failed to delete watcher"); }
   };
 
-  if (loading) return <div className="p-8 text-center text-gray-500">Loading watchers...</div>;
+  const STEP_LABELS = {
+    classify: "Classify",
+    "organize-by-date": "Organize by Date",
+    dedupe: "Deduplicate",
+    cloud_sync: "Cloud Sync",
+  };
+
+  if (loading) return <section className="panel" style={{ textAlign: "center", color: "var(--muted)" }}>Loading watchers…</section>;
 
   return (
-    <div className="max-w-6xl mx-auto p-6 space-y-8 animate-fade-in">
-      <div>
-        <h1 className="text-3xl font-light text-gray-800 mb-2">Watchers</h1>
-        <p className="text-gray-500">
+    <>
+      <section className="panel">
+        <h2>Watcher Daemon</h2>
+        <p style={{ color: "var(--muted)", marginBottom: 16 }}>
           Automatically run pipelines when new files are dropped into specific folders.
         </p>
-      </div>
 
-      {error && <div className="bg-red-50 text-red-600 p-4 rounded-lg">{error}</div>}
+        {error && <div style={{ background: "#fef2f2", color: "var(--accent-2)", padding: 12, borderRadius: 10, marginBottom: 12 }}>{error}</div>}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <div className="space-y-6">
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-            <h2 className="text-lg font-medium text-gray-800 mb-4">Create Watcher</h2>
-            <form onSubmit={handleAddWatcher} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Label</label>
-                <input
-                  type="text"
-                  value={label}
-                  onChange={(e) => setLabel(e.target.value)}
-                  placeholder="e.g., SD Card Drop"
-                  className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
-                />
+        <div className="watcher-grid">
+          {/* ── Left: Create form ───────────────────────────── */}
+          <div className="watcher-form-card">
+            <h3 style={{ margin: "0 0 14px" }}>Create Watcher</h3>
+            <form onSubmit={handleAddWatcher}>
+              <label>
+                Label
+                <input type="text" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g., SD Card Drop" />
+              </label>
+
+              <label>
+                Watch Folder Path *
+                <input type="text" value={watchPath} onChange={(e) => setWatchPath(e.target.value)} placeholder="/path/to/watch" required />
+              </label>
+
+              <label>Pipeline Steps</label>
+              <div className="pipeline-add-row">
+                <select value={pipelineStep} onChange={(e) => setPipelineStep(e.target.value)}>
+                  <option value="classify">Classify</option>
+                  <option value="organize-by-date">Organize by Date</option>
+                  <option value="dedupe">Deduplicate</option>
+                  <option value="cloud_sync">Cloud Sync</option>
+                </select>
+                <button type="button" className="secondary" onClick={addPipelineStep}>+ Add</button>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Watch Folder Path *</label>
-                <input
-                  type="text"
-                  value={watchPath}
-                  onChange={(e) => setWatchPath(e.target.value)}
-                  placeholder="/path/to/watch"
-                  className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
-                  required
-                />
-              </div>
+              {pipeline.length > 0 ? (
+                <ul className="pipeline-list">
+                  {pipeline.map((step, idx) => (
+                    <li key={idx} className="pipeline-item">
+                      <span className="pipeline-step-num">{idx + 1}.</span>
+                      <span className="pipeline-step-label">{STEP_LABELS[step.job_type] || step.job_type}</span>
+                      <button type="button" className="danger small" onClick={() => removePipelineStep(idx)}>✕</button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p style={{ color: "var(--muted)", fontStyle: "italic", fontSize: "0.88rem" }}>No steps added yet.</p>
+              )}
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Pipeline Steps</label>
-                <div className="flex items-center gap-2 mb-2">
-                  <select
-                    value={pipelineStep}
-                    onChange={(e) => setPipelineStep(e.target.value)}
-                    className="flex-1 px-4 py-2 border border-gray-200 rounded-lg outline-none"
-                  >
-                    <option value="classify">Classify</option>
-                    <option value="organize-by-date">Organize by Date</option>
-                    <option value="dedupe">Deduplicate</option>
-                    <option value="cloud_sync">Cloud Sync</option>
-                  </select>
-                  <button
-                    type="button"
-                    onClick={addPipelineStep}
-                    className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium"
-                  >
-                    Add Step
-                  </button>
-                </div>
-                
-                {pipeline.length > 0 ? (
-                  <ul className="space-y-2">
-                    {pipeline.map((step, idx) => (
-                      <li key={idx} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg border border-gray-100">
-                        <span className="font-medium text-gray-700">
-                          {idx + 1}. {step.job_type}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => removePipelineStep(idx)}
-                          className="text-red-500 hover:text-red-700 text-sm font-medium"
-                        >
-                          Remove
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="text-sm text-gray-500 italic">No steps added yet.</p>
-                )}
-              </div>
-
-              <div className="pt-4 border-t border-gray-100">
-                <button
-                  type="submit"
-                  disabled={pipeline.length === 0}
-                  className="w-full py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:opacity-50"
-                >
-                  Create Watcher
-                </button>
-              </div>
+              <button type="submit" className="primary" disabled={pipeline.length === 0} style={{ width: "100%", marginTop: 12 }}>
+                Create Watcher
+              </button>
             </form>
           </div>
-        </div>
 
-        <div className="space-y-6">
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-            <h2 className="text-lg font-medium text-gray-800 mb-4">Active Watchers</h2>
-            {watchers.length === 0 ? (
-              <p className="text-gray-500 text-center py-8">No watchers configured.</p>
-            ) : (
-              <ul className="space-y-4">
-                {watchers.map((w) => (
-                  <li key={w.id} className="p-4 rounded-xl border border-gray-100 shadow-sm relative overflow-hidden group">
-                    <div className="flex justify-between items-start mb-2">
-                      <div>
-                        <h3 className="font-semibold text-gray-800">{w.label}</h3>
-                        <p className="text-sm text-gray-500 truncate max-w-[250px]" title={w.watch_path}>
-                          {w.watch_path}
-                        </p>
+          {/* ── Right: Active watchers + events ─────────────── */}
+          <div className="watcher-right-col">
+            <div className="watcher-list-card">
+              <h3 style={{ margin: "0 0 14px" }}>Active Watchers</h3>
+              {watchers.length === 0 ? (
+                <p style={{ color: "var(--muted)", textAlign: "center", padding: "24px 0" }}>No watchers configured.</p>
+              ) : (
+                <div className="watcher-list">
+                  {watchers.map((w) => (
+                    <div key={w.id} className="watcher-card">
+                      <div className="watcher-card-head">
+                        <div>
+                          <strong>{w.label}</strong>
+                          <div className="watcher-path" title={w.watch_path}>{w.watch_path}</div>
+                        </div>
+                        <div className="watcher-actions">
+                          <button className={w.enabled ? "watcher-badge active" : "watcher-badge"} onClick={() => toggleWatcher(w.id, w.enabled)}>
+                            {w.enabled ? "Active" : "Paused"}
+                          </button>
+                          <button className="danger small" onClick={() => deleteWatcher(w.id)}>Delete</button>
+                        </div>
                       </div>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => toggleWatcher(w.id, w.enabled)}
-                          className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-                            w.enabled 
-                              ? 'bg-green-100 text-green-700 hover:bg-green-200' 
-                              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                          }`}
-                        >
-                          {w.enabled ? 'Active' : 'Paused'}
-                        </button>
-                        <button
-                          onClick={() => deleteWatcher(w.id)}
-                          className="px-3 py-1 rounded-full text-xs font-medium bg-red-50 text-red-600 hover:bg-red-100 transition-colors opacity-0 group-hover:opacity-100"
-                        >
-                          Delete
-                        </button>
+                      <div className="watcher-pipeline-tags">
+                        {w.pipeline.map((step, idx) => (
+                          <span key={idx} className="pipeline-tag">{STEP_LABELS[step.job_type] || step.job_type}</span>
+                        ))}
                       </div>
                     </div>
-                    <div className="flex gap-1 flex-wrap mt-3">
-                      {w.pipeline.map((step, idx) => (
-                        <span key={idx} className="px-2 py-1 bg-blue-50 text-blue-700 rounded text-[10px] font-bold uppercase tracking-wider">
-                          {step.job_type}
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="watcher-list-card" style={{ marginTop: 16 }}>
+              <h3 style={{ margin: "0 0 14px" }}>Recent Events</h3>
+              {events.length === 0 ? (
+                <p style={{ color: "var(--muted)", textAlign: "center", padding: "24px 0" }}>No recent activity.</p>
+              ) : (
+                <div className="event-feed">
+                  {events.map((ev) => (
+                    <div key={ev.id} className="event-row">
+                      <div className="event-row-head">
+                        <span>{ev.watcher_label || "—"}</span>
+                        <span className={`event-status ${ev.status === "completed" ? "ok" : ev.status === "failed" ? "err" : ""}`}>
+                          {ev.status}
                         </span>
-                      ))}
+                      </div>
+                      <div className="event-row-file" title={ev.file_path}>{ev.file_path.split("/").pop()}</div>
+                      <div className="event-row-time">{new Date(ev.detected_at).toLocaleString()}</div>
                     </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-            <h2 className="text-lg font-medium text-gray-800 mb-4">Recent Events</h2>
-            {events.length === 0 ? (
-              <p className="text-gray-500 text-center py-8">No recent activity.</p>
-            ) : (
-              <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
-                {events.map((e) => (
-                  <div key={e.id} className="text-sm p-3 rounded-lg bg-gray-50 border border-gray-100">
-                    <div className="flex justify-between mb-1">
-                      <span className="font-medium text-gray-700">{e.watcher_label}</span>
-                      <span className={`text-xs font-medium ${
-                        e.status === 'completed' ? 'text-green-600' : 
-                        e.status === 'failed' ? 'text-red-600' : 'text-blue-600'
-                      }`}>
-                        {e.status}
-                      </span>
-                    </div>
-                    <p className="text-gray-500 text-xs truncate" title={e.file_path}>
-                      {e.file_path.split('/').pop()}
-                    </p>
-                    <p className="text-gray-400 text-[10px] mt-1 text-right">
-                      {new Date(e.detected_at).toLocaleString()}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            )}
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
-      </div>
-    </div>
+      </section>
+    </>
   );
 }

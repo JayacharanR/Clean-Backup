@@ -1,0 +1,23 @@
+# render.yaml — Render Blueprint for Clean-Backup Demo
+# https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: clean-backup-demo
+    runtime: docker
+    repo: https://github.com/JayacharanR/Clean-Backup
+    branch: main
+    plan: free
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: DEMO_MODE
+        value: "true"
+      - key: CLEAN_BACKUP_PORT
+        value: "8080"
+      - key: CLEAN_BACKUP_LOG_LEVEL
+        value: info
+    healthCheckPath: /api/health
+    disk:
+      name: demo-data
+      mountPath: /app/data
+      sizeGB: 1
