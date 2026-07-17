@@ -1,5 +1,5 @@
 //! Duplicate Detection Module
-//! 
+//!
 //! Provides functionality to find duplicate images based on perceptual hashes.
 
 use crate::hash::{HashAlgorithm, ImageHash};
@@ -34,7 +34,7 @@ pub fn find_duplicates(
 ) -> Result<Vec<DuplicateGroup>, String> {
     // Compute hashes for all images
     let mut images: Vec<ImageInfo> = Vec::new();
-    
+
     for path in paths {
         match ImageHash::from_path(path, algorithm, 8) {
             Ok(hash) => {
@@ -50,7 +50,7 @@ pub fn find_duplicates(
             }
         }
     }
-    
+
     group_duplicates(images, threshold)
 }
 
@@ -74,7 +74,7 @@ pub fn find_duplicates_parallel(
             })
         })
         .collect();
-    
+
     group_duplicates(images, threshold)
 }
 
@@ -83,12 +83,12 @@ fn group_duplicates(images: Vec<ImageInfo>, threshold: u32) -> Result<Vec<Duplic
     if images.is_empty() {
         return Ok(Vec::new());
     }
-    
+
     // Union-Find structure for grouping
     let n = images.len();
     let mut parent: Vec<usize> = (0..n).collect();
     let mut rank: Vec<usize> = vec![0; n];
-    
+
     // Find with path compression
     fn find(parent: &mut [usize], i: usize) -> usize {
         if parent[i] != i {
@@ -96,7 +96,7 @@ fn group_duplicates(images: Vec<ImageInfo>, threshold: u32) -> Result<Vec<Duplic
         }
         parent[i]
     }
-    
+
     // Union by rank
     fn union(parent: &mut [usize], rank: &mut [usize], i: usize, j: usize) {
         let pi = find(parent, i);
@@ -112,7 +112,7 @@ fn group_duplicates(images: Vec<ImageInfo>, threshold: u32) -> Result<Vec<Duplic
             }
         }
     }
-    
+
     // Compare all pairs and union similar images
     for i in 0..n {
         for j in (i + 1)..n {
@@ -122,33 +122,33 @@ fn group_duplicates(images: Vec<ImageInfo>, threshold: u32) -> Result<Vec<Duplic
             }
         }
     }
-    
+
     // Group by parent
     let mut groups: HashMap<usize, Vec<usize>> = HashMap::new();
     for i in 0..n {
         let root = find(&mut parent, i);
         groups.entry(root).or_default().push(i);
     }
-    
+
     // Convert to DuplicateGroup
     let result: Vec<DuplicateGroup> = groups
         .into_values()
         .map(|indices| {
             let mut paths: Vec<String> = indices.iter().map(|&i| images[i].path.clone()).collect();
-            
+
             // Find best (highest resolution) image
             let best_idx = indices
                 .iter()
                 .max_by_key(|&&i| images[i].resolution)
                 .copied()
                 .unwrap_or(indices[0]);
-            
+
             let best_path = images[best_idx].path.clone();
             let hash = images[indices[0]].hash.to_hex();
-            
+
             // Sort paths for consistent output
             paths.sort();
-            
+
             DuplicateGroup {
                 paths,
                 hash,
@@ -156,7 +156,7 @@ fn group_duplicates(images: Vec<ImageInfo>, threshold: u32) -> Result<Vec<Duplic
             }
         })
         .collect();
-    
+
     Ok(result)
 }
 
@@ -170,7 +170,7 @@ fn get_image_resolution(path: &str) -> Result<u64, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_empty_input() {
         let result = find_duplicates(&[], HashAlgorithm::PHash, 10).unwrap();

@@ -1,29 +1,29 @@
 //! Perceptual Image Hashing Library
-//! 
+//!
 //! This library provides fast perceptual hashing (pHash) for detecting
 //! visually similar or duplicate images, even when they differ in:
 //! - Resolution
 //! - Format (JPG, PNG, etc.)
 //! - Minor edits or compression artifacts
-//! 
+//!
 //! Uses DCT-based perceptual hashing for robustness.
 
-mod hash;
 mod duplicate;
+mod hash;
 
-use pyo3::prelude::*;
 use pyo3::conversion::ToPyObject;
+use pyo3::prelude::*;
 use std::collections::HashMap;
 
-pub use hash::{ImageHash, HashAlgorithm};
-pub use duplicate::{DuplicateGroup, find_duplicates, find_duplicates_parallel};
+pub use duplicate::{find_duplicates, find_duplicates_parallel, DuplicateGroup};
+pub use hash::{HashAlgorithm, ImageHash};
 
 /// Compute the perceptual hash (pHash) of an image file.
-/// 
+///
 /// Args:
 ///     path: Path to the image file
 ///     hash_size: Size of the hash (default: 8, produces 64-bit hash)
-/// 
+///
 /// Returns:
 ///     Hex string representation of the hash
 #[pyfunction]
@@ -31,16 +31,16 @@ pub use duplicate::{DuplicateGroup, find_duplicates, find_duplicates_parallel};
 fn compute_hash(path: &str, hash_size: usize) -> PyResult<String> {
     let hash = ImageHash::from_path(path, HashAlgorithm::PHash, hash_size)
         .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
-    
+
     Ok(hash.to_hex())
 }
 
 /// Compute the Hamming distance between two hash strings.
-/// 
+///
 /// Args:
 ///     hash1: First hash as hex string
 ///     hash2: Second hash as hex string
-/// 
+///
 /// Returns:
 ///     Number of differing bits (0 = identical, higher = more different)
 #[pyfunction]
@@ -49,17 +49,17 @@ fn hamming_distance(hash1: &str, hash2: &str) -> PyResult<u32> {
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
     let h2 = ImageHash::from_hex(hash2)
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-    
+
     Ok(h1.distance(&h2))
 }
 
 /// Check if two images are perceptually similar using pHash.
-/// 
+///
 /// Args:
 ///     path1: Path to first image
 ///     path2: Path to second image
 ///     threshold: Maximum Hamming distance to consider similar (default: 10)
-/// 
+///
 /// Returns:
 ///     True if images are similar, False otherwise
 #[pyfunction]
@@ -69,16 +69,16 @@ fn are_similar(path1: &str, path2: &str, threshold: u32) -> PyResult<bool> {
         .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
     let hash2 = ImageHash::from_path(path2, HashAlgorithm::PHash, 8)
         .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
-    
+
     Ok(hash1.distance(&hash2) <= threshold)
 }
 
 /// Find duplicate images in a list of file paths using pHash.
-/// 
+///
 /// Args:
 ///     paths: List of image file paths to check
 ///     threshold: Maximum Hamming distance for duplicates (default: 10)
-/// 
+///
 /// Returns:
 ///     List of duplicate groups, each containing:
 ///     - "paths": List of file paths in this duplicate group
@@ -92,7 +92,7 @@ fn find_duplicate_images(
 ) -> PyResult<Vec<HashMap<String, PyObject>>> {
     let groups = find_duplicates_parallel(&paths, HashAlgorithm::PHash, threshold)
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-    
+
     Python::with_gil(|py| {
         let result: Vec<HashMap<String, PyObject>> = groups
             .into_iter()
@@ -110,20 +110,18 @@ fn find_duplicate_images(
 }
 
 /// Compute pHashes for multiple images in parallel.
-/// 
+///
 /// Args:
 ///     paths: List of image file paths
-/// 
+///
 /// Returns:
 ///     Dictionary mapping file paths to their hash strings.
 ///     Failed images are excluded from the result.
 #[pyfunction]
 #[pyo3(signature = (paths))]
-fn compute_hashes_parallel(
-    paths: Vec<String>,
-) -> PyResult<HashMap<String, String>> {
+fn compute_hashes_parallel(paths: Vec<String>) -> PyResult<HashMap<String, String>> {
     use rayon::prelude::*;
-    
+
     let results: HashMap<String, String> = paths
         .par_iter()
         .filter_map(|path| {
@@ -132,7 +130,7 @@ fn compute_hashes_parallel(
                 .map(|h| (path.clone(), h.to_hex()))
         })
         .collect();
-    
+
     Ok(results)
 }
 
@@ -144,12 +142,12 @@ fn phash_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(are_similar, m)?)?;
     m.add_function(wrap_pyfunction!(find_duplicate_images, m)?)?;
     m.add_function(wrap_pyfunction!(compute_hashes_parallel, m)?)?;
-    
+
     // Add constants for recommended thresholds
     m.add("THRESHOLD_IDENTICAL", 0)?;
     m.add("THRESHOLD_VERY_SIMILAR", 5)?;
     m.add("THRESHOLD_SIMILAR", 10)?;
     m.add("THRESHOLD_SOMEWHAT_SIMILAR", 15)?;
-    
+
     Ok(())
 }
