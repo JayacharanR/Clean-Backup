@@ -8,6 +8,8 @@
 //!
 //! Uses DCT-based perceptual hashing for robustness.
 
+#![allow(clippy::useless_conversion)]
+
 mod duplicate;
 mod hash;
 

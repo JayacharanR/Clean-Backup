@@ -43,7 +43,7 @@ impl ImageHash {
     /// Parse hash from hex string
     pub fn from_hex(hex: &str) -> Result<Self, String> {
         let hex = hex.trim();
-        if hex.len() % 2 != 0 {
+        if !hex.len().is_multiple_of(2) {
             return Err("Invalid hex string length".to_string());
         }
 
