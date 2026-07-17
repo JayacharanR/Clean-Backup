@@ -483,7 +483,7 @@ def _run_cloud_sync_step(
 ) -> None:
     """Trigger a cloud sync for the target files."""
     from src.cloud.sync_pipeline import run_sync
-    from src.cloud.manifest import create_sync_run, get_cloud_account, list_cloud_accounts
+    from src.cloud.manifest import create_sync_run, list_cloud_accounts
 
     # Find the account to sync to — use the one specified in the step,
     # or fall back to the first connected account.

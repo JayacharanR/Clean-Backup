@@ -12,7 +12,6 @@ import json
 import sqlite3
 import threading
 import os
-from datetime import datetime
 from pathlib import Path
 
 from src.classify.category_config import CATEGORY_TAXONOMY

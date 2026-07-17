@@ -11,7 +11,6 @@ import json
 from datetime import datetime
 
 from src.classify.db import _get_conn
-from src.logger import logger
 
 
 # ── Cloud accounts ─────────────────────────────────────────────────────────

@@ -208,7 +208,7 @@ def main():
                     print(f"  Using Rust perceptual hashing to detect duplicate images (Threshold: {current_threshold})")
                 
                 if check_name_duplicates:
-                    print(f"  Detecting OS duplicate patterns: (1), (copy), - Copy, copy, drag/drop numbers")
+                    print("  Detecting OS duplicate patterns: (1), (copy), - Copy, copy, drag/drop numbers")
                 
                 stats = organise_files(source, destination, operation, check_duplicates=check_duplicates, duplicate_threshold=current_threshold, check_name_duplicates=check_name_duplicates)
                 print_summary(stats, operation)
@@ -220,7 +220,6 @@ def main():
                 if sync_choice == 'y':
                     try:
                         from src.gdrive_sync import GoogleDriveSync, print_sync_summary, is_gdrive_available
-                        from datetime import datetime
                         
                         if not is_gdrive_available():
                             print("\n❌ Google Drive support not installed")

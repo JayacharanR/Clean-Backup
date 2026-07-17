@@ -3,12 +3,11 @@ import re
 from pathlib import Path
 from collections import defaultdict
 from multiprocessing import Pool, cpu_count
-from functools import partial
 from tqdm import tqdm
 from src import constants
 from src.metadata import get_image_date, get_video_date, get_file_modification_date
 from src.logger import logger
-from src.phash import find_duplicates, find_duplicates_from_paths, is_rust_available, THRESHOLD_SIMILAR
+from src.phash import find_duplicates_from_paths, is_rust_available, THRESHOLD_SIMILAR
 from src.undo_manager import undo_manager
 
 def detect_name_based_duplicates(file_paths):
@@ -286,7 +285,7 @@ def organise_files(
                         if path not in dest_images_set:
                             duplicate_files.add(Path(path).resolve())
                             stats['perceptual_duplicates'] += 1
-                    logger.info(f"Duplicate group found in destination: skipping source files")
+                    logger.info("Duplicate group found in destination: skipping source files")
                 else:
                     # Mark all duplicates except the best one (source-only group)
                     for dup_path in group.duplicates:
@@ -397,7 +396,7 @@ def print_summary(stats, operation='move'):
     
     # Show folders created with file counts
     if stats['folders_created']:
-        print(f"\n🗂  Organized into:")
+        print("\n🗂  Organized into:")
         for folder, count in sorted(stats['folders_created'].items()):
             print(f"   - {folder} ({count:,} files)")
     

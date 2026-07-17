@@ -19,8 +19,7 @@ from src.phash import (
     DuplicateGroup,
     is_rust_available,
     get_backend,
-    THRESHOLD_SIMILAR,
-    THRESHOLD_VERY_SIMILAR
+    THRESHOLD_SIMILAR
 )
 from src.logger import logger
 from src.undo_manager import undo_manager
@@ -363,7 +362,7 @@ def print_duplicate_report(report: DuplicateReport):
     
     # Show detailed groups
     if report.groups:
-        print(f"\n📂 Duplicate Groups:")
+        print("\n📂 Duplicate Groups:")
         for i, group in enumerate(report.groups[:10], 1):  # Show first 10
             print(f"\n   Group {i} ({len(group.paths)} images):")
             print(f"   Best (keeping): {Path(group.best).name}")
@@ -405,7 +404,7 @@ def main():
             print("Cancelled.")
             return
     
-    print(f"\n⏳ Scanning for duplicates...")
+    print("\n⏳ Scanning for duplicates...")
     report = handle_duplicates(source, action=action)
     print_duplicate_report(report)
 

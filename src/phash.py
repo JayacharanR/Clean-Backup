@@ -16,9 +16,8 @@ Usage:
         print("Images are duplicates!")
 """
 
-import os
 from pathlib import Path
-from typing import List, Dict, Optional, Literal
+from typing import List, Dict, Optional
 from dataclasses import dataclass
 from src.logger import logger
 from src import constants
@@ -246,7 +245,6 @@ def _python_compute_hash(
 def _python_phash(img, hash_size: int) -> str:
     """Perceptual hash using DCT."""
     from PIL import Image
-    import math
     
     # Resize to 32x32 for DCT
     img = img.resize((32, 32), Image.Resampling.LANCZOS)

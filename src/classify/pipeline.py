@@ -25,7 +25,6 @@ from typing import Any, Callable
 from src.classify import db
 from src.classify.stage_document import detect_document, detect_screenshot
 from src.classify.stage_exif import (
-    ExifData,
     detect_events_from_exif,
     detect_night_from_exif,
     detect_travel,

@@ -1285,7 +1285,7 @@ def api_gdrive_callback():
         credential_store.store(cred_ref, token_data)
 
         # Create DB record
-        account_id = create_cloud_account("gdrive", label, cred_ref)
+        create_cloud_account("gdrive", label, cred_ref)
 
         # Redirect back to the web UI
         return (

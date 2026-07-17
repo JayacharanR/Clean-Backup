@@ -6,15 +6,12 @@ Uses the central clean_backup.db
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 import threading
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from src.classify.db import DB_PATH
-from src.logger import logger
 
 _local = threading.local()
 

@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from PIL import Image
-from PIL.ExifTags import GPSTAGS, IFD, TAGS
+from PIL.ExifTags import IFD, TAGS
 
 from src.classify.category_config import EVENT_KEYWORDS, TRAVEL_KEYWORDS
 from src.logger import logger

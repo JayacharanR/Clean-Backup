@@ -1,7 +1,6 @@
 import json
 import os
 import shutil
-import glob
 from pathlib import Path
 from datetime import datetime
 from src.logger import logger
@@ -56,7 +55,7 @@ class UndoManager:
                     path = path.parent
                 else:
                     break
-        except Exception as e:
+        except Exception:
             # Stops bubbling up if duplicate_handler or other process is using the dir, or permission denied
             pass
 
@@ -151,7 +150,7 @@ class UndoManager:
                 logger.error(f"Error undoing action {entry}: {e}")
                 fail_count += 1
 
-        print(f"\nUndo Complete.")
+        print("\nUndo Complete.")
         print(f"Successfully reverted: {success_count} files")
         print(f"Failed to revert: {fail_count} files")
         
@@ -161,7 +160,7 @@ class UndoManager:
             new_path = str(session_path) + ".reverted"
             os.rename(session_path, new_path)
             logger.info("Marked journal as reverted.")
-        except:
+        except OSError:
             pass
             
         return True

@@ -3,10 +3,9 @@ Compression module for images and videos.
 Supports lossless and near-lossless compression with configurable levels.
 """
 
-import os
 import subprocess
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal
 from dataclasses import dataclass
 from PIL import Image
 import pillow_heif
@@ -284,7 +283,6 @@ def compress_files(
             stats.compressed_size += compressed_size
             
             # Log compression result
-            saved = original_size - compressed_size
             ratio = (1 - compressed_size / original_size) * 100 if original_size > 0 else 0
             logger.info(f"  {file_path.name}: {original_size:,} -> {compressed_size:,} bytes ({ratio:.1f}% reduction)")
         else:

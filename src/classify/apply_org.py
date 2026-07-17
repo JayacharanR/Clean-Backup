@@ -60,7 +60,7 @@ def apply_classification(run_id, dest_dir, operation, progress_cb=None):
                 from datetime import datetime
                 # Assuming timestamp is ISO 8601 string
                 dt = datetime.fromisoformat(row["created_at"])
-            except:
+            except (ValueError, TypeError):
                 from datetime import datetime
                 dt = datetime.fromtimestamp(src_path.stat().st_mtime)
         else:

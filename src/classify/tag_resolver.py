@@ -14,7 +14,6 @@ final set of tags for each file:
 from __future__ import annotations
 
 from src.classify import db
-from src.logger import logger
 
 
 def resolve_tags(

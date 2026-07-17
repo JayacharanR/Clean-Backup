@@ -8,9 +8,6 @@ Talks *only* through the ``CloudProvider`` interface — never imports SDK modul
 from __future__ import annotations
 
 import hashlib
-import logging
-import os
-import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -18,7 +15,6 @@ from typing import Any, Callable
 
 from src.cloud import credential_store
 from src.cloud.manifest import (
-    create_sync_run,
     get_cloud_account,
     get_sync_run,
     get_uploaded_hashes_for_account,
@@ -26,7 +22,6 @@ from src.cloud.manifest import (
     update_sync_run,
     get_manifest_for_run,
     mark_deleted_by_undo,
-    get_run_stats,
     get_latest_run_for_account,
 )
 from src.cloud.provider_base import CloudProvider
@@ -158,7 +153,6 @@ def run_sync(
 
     # ── 6. Upload loop ─────────────────────────────────────────────────
     folder_scheme = config.get("folder_scheme", "flat")
-    duplicate_handling = config.get("duplicate_handling", "skip")
     throttle_kb = config.get("throttle_kb", 0)
 
     # Simple throttle via a semaphore (sequential uploads with optional delay)
@@ -247,7 +241,7 @@ def undo_sync(
 
     account = get_cloud_account(run["account_id"])
     if not account:
-        raise ValueError(f"Cloud account not found")
+        raise ValueError("Cloud account not found")
 
     # Check it's the latest run
     latest = get_latest_run_for_account(run["account_id"])
