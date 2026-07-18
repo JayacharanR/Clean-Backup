@@ -65,3 +65,5 @@ id_ed25519
 secrets.*
 *.secrets
 *.secret
+# ML Models
+*.onnx
