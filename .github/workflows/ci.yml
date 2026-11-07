@@ -85,7 +85,7 @@ jobs:
       - name: Smoke-test the built application
         run: |
           docker run --detach --publish 127.0.0.1:8080:8080 --name clean-backup-ci clean-backup:ci-test
-          curl --fail --retry 30 --retry-connrefused --retry-delay 2 http://127.0.0.1:8080/api/health \
+          curl --fail --retry 30 --retry-all-errors --retry-delay 2 --retry-max-time 90 --max-time 5 http://127.0.0.1:8080/api/health \
             | python3 -c 'import json, sys; data = json.load(sys.stdin); assert data["ok"] and data["backend"] == "rust (phash_rs)", data'
           curl --fail http://127.0.0.1:8080/ \
             | python3 -c 'import sys; assert "<div id=\"root\"></div>" in sys.stdin.read(), "Frontend build was not served"'
