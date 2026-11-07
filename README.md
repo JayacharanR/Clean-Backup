@@ -184,6 +184,21 @@ python main.py        # CLI mode
 python main.py --web  # Web GUI at http://localhost:8080
 ```
 
+### Checks
+
+After completing local setup, install the development tools and run the same checks as CI:
+
+```bash
+pip install -r requirements-dev.txt
+python -m ruff check src/ main.py tests/
+python -m pytest tests/ -v --tb=short
+cargo fmt --manifest-path phash_rs/Cargo.toml --check
+cargo clippy --manifest-path phash_rs/Cargo.toml --locked -- -D warnings
+cargo test --manifest-path phash_rs/Cargo.toml --locked
+```
+
+The Python tests use disposable media, configuration, databases, and undo journals. They require the compiled Rust module and exercise duplicate scanning, image previews, date-based copy/move organization, undo, demo-mode restrictions, and input validation. CI also builds and starts the Docker image, checks its Rust backend health response, and verifies that it serves the frontend. Test failures fail the workflow.
+
 ## Privacy
 
 Clean-Backup runs **100% offline**. All machine learning models (ONNX) are baked into the Docker image and require no cloud API calls. Face embeddings and classification tags are stored only in your local SQLite database. No telemetry, no analytics, no data leaves your machine.

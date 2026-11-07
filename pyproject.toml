@@ -19,3 +19,11 @@ dependencies = [
     "google-api-python-client>=2.100.0",
     "watchdog>=6.0.0",
 ]
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+# Keep the project's existing syntax and undefined/unused-name checks explicit.
+# Ruff upgrades must not silently change the rule set for unchanged code.
+select = ["E4", "E7", "E9", "F"]
