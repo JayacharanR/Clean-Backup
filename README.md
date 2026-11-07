@@ -2,8 +2,9 @@
 
 **Intelligent media organization with perceptual deduplication, AI classification, and a hybrid Rust/Python architecture.**
 
-<!-- Demo GIF placeholder — replace with actual recording once available -->
-<!-- ![Demo](docs/demo.gif) -->
+![Clean-Backup demonstration: scan for duplicates, compare images, organize by date, and undo the operation](docs/demo.gif)
+
+*A 32-second walkthrough of the running web app: scan nine sample images, review three duplicate groups, organize copies by date, and undo the session. Actual screen captures, edited for pace. [Recording details and sample sources](docs/RECORDING.md).*
 
 [![CI](https://github.com/JayacharanR/Clean-Backup/actions/workflows/ci.yml/badge.svg)](https://github.com/JayacharanR/Clean-Backup/actions/workflows/ci.yml)
 [![Release](https://github.com/JayacharanR/Clean-Backup/actions/workflows/release.yml/badge.svg)](https://github.com/JayacharanR/Clean-Backup/actions/workflows/release.yml)
