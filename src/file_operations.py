@@ -36,7 +36,7 @@ def locked_paths(*paths):
         _held_locks.paths = held
         acquired = []
         try:
-            for name in sorted({str(Path(p).absolute()) for p in paths}):
+            for name in sorted({str(Path(p).absolute().parent.resolve() / Path(p).name) for p in paths}):
                 if name in held:
                     continue
                 lock_dir = Path(tempfile.gettempdir()) / f"clean-backup-locks-{getattr(os, 'getuid', lambda: 0)()}"
@@ -75,7 +75,7 @@ def _revision(info):
 def file_identity(path):
     """Hash a regular file and refuse symlinks or a revision changed during reading."""
     path = Path(path)
-    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
     with os.fdopen(fd, "rb") as stream:
         before = os.fstat(stream.fileno())
         if not stat.S_ISREG(before.st_mode):
