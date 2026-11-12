@@ -12,6 +12,7 @@ import pillow_heif
 
 from src.constants import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
 from src.logger import logger
+from src.file_operations import staged_output, validate_roots
 
 pillow_heif.register_heif_opener()
 
@@ -75,7 +76,7 @@ def get_compression_settings(level: CompressionLevel) -> dict:
     return settings.get(level, settings[2])
 
 
-def compress_image(
+def _encode_image(
     image_path: Path,
     output_path: Path,
     level: CompressionLevel = 2
@@ -120,7 +121,6 @@ def compress_image(
                 del save_kwargs['quality']  # PNG doesn't use quality parameter
             
             img.save(output_path, **save_kwargs)
-            logger.info(f"Compressed image: {image_path.name} -> {output_path.name}")
             return True
             
     except Exception as e:
@@ -128,7 +128,7 @@ def compress_image(
         return False
 
 
-def compress_video(
+def _encode_video(
     video_path: Path,
     output_path: Path,
     level: CompressionLevel = 2
@@ -168,7 +168,7 @@ def compress_video(
             '-c:a', 'aac',  # Audio codec
             '-b:a', '128k',  # Audio bitrate
             '-movflags', '+faststart',  # Web optimization
-            '-y',  # Overwrite output
+            '-y',  # Only the exclusively created private staging file.
             str(output_path)
         ]
         
@@ -181,7 +181,6 @@ def compress_video(
         )
         
         if result.returncode == 0:
-            logger.info(f"Compressed video: {video_path.name} -> {output_path.name}")
             return True
         else:
             logger.error(f"FFmpeg failed for {video_path.name}: {result.stderr}")
@@ -196,6 +195,29 @@ def compress_video(
     except Exception as e:
         logger.error(f"Failed to compress video {video_path}: {e}")
         return False
+
+
+def _compress_to_new_output(source, target, level, encoder):
+    source, target = Path(source), Path(target)
+    try:
+        with staged_output(source, target) as temporary:
+            if not encoder(source, temporary, level):
+                raise OSError("Encoder did not complete successfully")
+        logger.info("Compressed and published: %s -> %s", source, target)
+        return True
+    except Exception as exc:
+        logger.error("Compression output was not published for %s: %s", source, exc)
+        return False
+
+
+def compress_image(image_path: Path, output_path: Path, level: CompressionLevel = 2) -> bool:
+    """Encode a new image without replacing a source or existing destination."""
+    return _compress_to_new_output(image_path, output_path, level, _encode_image)
+
+
+def compress_video(video_path: Path, output_path: Path, level: CompressionLevel = 2) -> bool:
+    """Encode to private staging space; publish only after FFmpeg succeeds."""
+    return _compress_to_new_output(video_path, output_path, level, _encode_video)
 
 
 def compress_files(
@@ -218,12 +240,7 @@ def compress_files(
     Returns:
         CompressionStats: Statistics about the compression operation
     """
-    source = Path(source_dir)
-    output = Path(output_dir)
-    
-    if not source.exists():
-        logger.error(f"Source directory not found: {source}")
-        return CompressionStats()
+    source, output = validate_roots(source_dir, output_dir)
     
     # Create output directory
     output.mkdir(parents=True, exist_ok=True)
