@@ -19,12 +19,15 @@ propagates instead of being silently treated as successful recovery bookkeeping.
 Completed undo actions are persisted individually; conflicts keep the remaining
 journal available through the existing API.
 
-Validation at this phase: 62 Python tests, including the 16 existing API/workflow
+Validation at this phase: 65 Python tests, including the 16 existing API/workflow
 tests, plus Ruff and a frontend production build. The added regressions cover separate-process name collisions,
 disk-full errors, corrupted copies, changed sources, occupied restore paths,
 partial undo retries, completion-write failures, abrupt process exits at three
 transfer boundaries, and compression failures/races. All fixtures are disposable.
-The 46 tests added by this phase also run from an export of the committed tree.
+The 49 tests added by this phase also run from an export of the committed tree.
+Legacy callers now close their journals on return and exceptions, and API Trash
+requests own independent session managers. The read-only classification scan no
+longer opens an unused file-operation journal.
 
 ## Current limits and next repairs
 

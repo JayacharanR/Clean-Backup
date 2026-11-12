@@ -11,13 +11,15 @@ def apply_classification(run_id, dest_dir, operation, progress_cb=None):
     """
     Applies the classification results from the DB to physical files.
     """
+    with UndoManager() as undo_mgr:
+        return _apply_classification(run_id, dest_dir, operation, progress_cb, undo_mgr)
+
+
+def _apply_classification(run_id, dest_dir, operation, progress_cb, undo_mgr):
     dest_path = Path(dest_dir)
     if not dest_path.exists():
         dest_path.mkdir(parents=True)
 
-    undo_mgr = UndoManager()
-    undo_mgr.start_session()
-    
     config = get_run_config(run_id)
     if not config:
         raise ValueError(f"Run ID {run_id} not found in DB")

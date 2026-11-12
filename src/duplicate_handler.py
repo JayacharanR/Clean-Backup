@@ -22,7 +22,7 @@ from src.phash import (
     THRESHOLD_SIMILAR
 )
 from src.logger import logger
-from src.undo_manager import undo_manager
+from src.undo_manager import UndoManager
 
 
 @dataclass
@@ -250,10 +250,13 @@ def handle_duplicates(
     Returns:
         DuplicateReport with statistics and details
     """
+    with UndoManager() as session:
+        return _handle_duplicates(source_dir, duplicates_dir, action, threshold, keep_best, session)
+
+
+def _handle_duplicates(source_dir, duplicates_dir, action, threshold, keep_best, undo_manager):
     source_path = Path(source_dir)
     
-    undo_manager.start_session()
-
     # Find duplicates
     groups = scan_for_duplicates(source_dir, threshold)
     
@@ -327,7 +330,6 @@ def handle_duplicates(
                     logger.error(f"Error deleting {dup}: {e}")
                     report.errors += 1
     
-    undo_manager.end_session()
     return report
 
 

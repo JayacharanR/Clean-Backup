@@ -4,6 +4,8 @@ from concurrent.futures import ThreadPoolExecutor
 import json
 import multiprocessing
 import os
+from contextlib import nullcontext
+from types import SimpleNamespace
 
 import pytest
 
@@ -249,3 +251,65 @@ def test_organizer_rejects_overlapping_roots_before_mutation(state, nested):
     with pytest.raises(ValueError, match="overlap"):
         organise_files(source, target)
     assert not list(state.rglob("journal_*.json"))
+
+
+def test_legacy_duplicate_report_releases_its_session(state, monkeypatch):
+    from src import duplicate_handler
+
+    managers = []
+
+    def manager_factory():
+        manager = journals.UndoManager()
+        managers.append(manager)
+        return manager
+
+    monkeypatch.setattr(duplicate_handler, "UndoManager", manager_factory)
+    monkeypatch.setattr(duplicate_handler, "scan_for_duplicates", lambda *args: [])
+    for _ in range(2):
+        duplicate_handler.handle_duplicates(str(state), action="report")
+    assert all(m.session_id is None and m._session_fd is None for m in managers)
+
+
+@pytest.mark.parametrize("callback_failure", [False, True])
+def test_legacy_classification_releases_journal_on_return_or_error(
+    state, monkeypatch, callback_failure
+):
+    from src.classify import apply_org
+
+    source = state / "photo.jpg"
+    source.write_bytes(b"original fixture")
+    manager = journals.UndoManager()
+    monkeypatch.setattr(apply_org, "UndoManager", lambda: manager)
+    monkeypatch.setattr(
+        apply_org, "get_run_config", lambda _: {"multi_category": "tags"}
+    )
+    monkeypatch.setattr(
+        apply_org,
+        "get_all_tags_for_run",
+        lambda _: [
+            {"path": str(source), "category_label": "example"},
+        ],
+    )
+    cursor = SimpleNamespace(execute=lambda *args: None, fetchone=lambda: None)
+    monkeypatch.setattr(
+        apply_org,
+        "_get_conn",
+        lambda: nullcontext(SimpleNamespace(cursor=lambda: cursor)),
+    )
+
+    def failed_callback(*args):
+        raise RuntimeError("Callback failed")
+
+    if callback_failure:
+        with pytest.raises(RuntimeError, match="Callback failed"):
+            apply_org.apply_classification(
+                "test", state / "out", "copy", failed_callback
+            )
+    else:
+        result = apply_org.apply_classification("test", state / "out", "copy")
+        assert result["session_id"]
+    assert manager.session_id is None and manager._session_fd is None
+    sessions = manager.list_sessions()
+    assert len(sessions) == 1
+    assert manager.undo_session(sessions[0]["path"])
+    assert source.read_bytes() == b"original fixture"

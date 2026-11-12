@@ -21,7 +21,7 @@ from src.duplicate_handler import scan_for_duplicates_with_progress
 from src.logger import logger
 from src.organiser import organise_files
 from src.phash import get_backend
-from src.undo_manager import undo_manager
+from src.undo_manager import UndoManager, undo_manager
 from src.demo import demo_guard, is_demo_mode
 
 # Classification module
@@ -802,7 +802,8 @@ def api_delete_selected():
     deleted_paths: list[str] = []
     errors: list[str] = []
 
-    undo_manager.start_session()
+    session_manager = UndoManager()
+    session_manager.start_session()
 
     try:
         for item in selected_images:
@@ -827,7 +828,7 @@ def api_delete_selected():
                     target = _trash_target_for(file_path)
                     target.parent.mkdir(parents=True, exist_ok=True)
                     file_path.rename(target)
-                    undo_manager.log_action("move", str(file_path), str(target))
+                    session_manager.log_action("move", str(file_path), str(target))
                 else:
                     file_path.unlink()
 
@@ -835,9 +836,9 @@ def api_delete_selected():
             except Exception as exc:
                 errors.append(str(exc))
 
-        undo_manager.end_session()
+        session_manager.end_session()
     except Exception:
-        undo_manager.end_session()
+        session_manager.end_session()
         raise
 
     return jsonify(

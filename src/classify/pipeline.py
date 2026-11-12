@@ -36,7 +36,6 @@ from src.classify.stage_scene import SceneClassifier
 from src.classify.tag_resolver import resolve_tags
 from src.constants import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
 from src.logger import logger
-from src.undo_manager import undo_manager
 
 
 def run_classify_pipeline(
@@ -117,9 +116,6 @@ def run_classify_pipeline(
 
     # Pre-load known face embeddings for Stage E matching
     known_embeddings = db.get_all_known_embeddings() if face_recognizer.available else []
-
-    # ── Start undo session ────────────────────────────────────────────
-    undo_manager.start_session()
 
     # ── Process each file ─────────────────────────────────────────────
     stats: dict[str, int] = defaultdict(int)
@@ -275,7 +271,6 @@ def run_classify_pipeline(
                 total_review += 1
 
     # ── Finalise ──────────────────────────────────────────────────────
-    undo_manager.end_session()
     progress_cb(98, "Building summary")
 
     summary = {
