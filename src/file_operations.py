@@ -16,7 +16,8 @@ import threading
 
 try:
     import fcntl
-except ImportError:  # Windows still gets process-local locking and exclusive publication.
+except ImportError:
+    # Windows still gets process-local locking and exclusive publication.
     fcntl = None
 
 
@@ -36,13 +37,22 @@ def locked_paths(*paths):
         _held_locks.paths = held
         acquired = []
         try:
-            for name in sorted({str(Path(p).absolute().parent.resolve() / Path(p).name) for p in paths}):
+            for name in sorted(
+                {str(Path(p).absolute().parent.resolve() / Path(p).name) for p in paths}
+            ):
                 if name in held:
                     continue
-                lock_dir = Path(tempfile.gettempdir()) / f"clean-backup-locks-{getattr(os, 'getuid', lambda: 0)()}"
+                lock_dir = (
+                    Path(tempfile.gettempdir())
+                    / f"clean-backup-locks-{getattr(os, 'getuid', lambda: 0)()}"
+                )
                 lock_dir.mkdir(mode=0o700, exist_ok=True)
                 lock_path = lock_dir / hashlib.sha256(name.encode()).hexdigest()
-                fd = os.open(lock_path, os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
+                fd = os.open(
+                    lock_path,
+                    os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0),
+                    0o600,
+                )
                 try:
                     if fcntl:
                         fcntl.flock(fd, fcntl.LOCK_EX)
@@ -75,25 +85,40 @@ def _revision(info):
 def file_identity(path):
     """Hash a regular file and refuse symlinks or a revision changed during reading."""
     path = Path(path)
-    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+    fd = os.open(
+        path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    )
     with os.fdopen(fd, "rb") as stream:
         before = os.fstat(stream.fileno())
         if not stat.S_ISREG(before.st_mode):
             raise FileConflictError(f"Not a regular file: {path}")
         digest = hashlib.file_digest(stream, "sha256").hexdigest()
         after = os.fstat(stream.fileno())
-    if _revision(before) != _revision(after) or _revision(after) != _revision(path.lstat()):
+    if _revision(before) != _revision(after) or _revision(after) != _revision(
+        path.lstat()
+    ):
         raise FileConflictError(f"File changed while reading: {path}")
-    return dict(zip(("device", "inode", "size", "mtime_ns", "ctime_ns"), _revision(after)), sha256=digest)
+    return dict(
+        zip(("device", "inode", "size", "mtime_ns", "ctime_ns"), _revision(after)),
+        sha256=digest,
+    )
 
 
 def require_identity(path, expected, *, published=False):
+    if not expected:
+        raise FileConflictError(f"No recorded file identity: {path}")
     actual = file_identity(path)
     # Linking/unlinking the staging name changes ctime. Pending journal intents
     # still identify the exact inode and bytes even across that publication step.
-    keys = ("device", "inode", "size", "mtime_ns", "sha256") if published else expected.keys()
-    if not expected or any(actual.get(key) != expected.get(key) for key in keys):
-        raise FileConflictError(f"File changed since the operation was recorded: {path}")
+    keys = (
+        ("device", "inode", "size", "mtime_ns", "sha256")
+        if published
+        else expected.keys()
+    )
+    if any(actual.get(key) != expected.get(key) for key in keys):
+        raise FileConflictError(
+            f"File changed since the operation was recorded: {path}"
+        )
     return actual
 
 
@@ -101,13 +126,19 @@ def validate_roots(source, destination):
     source, destination = Path(source).resolve(), Path(destination).resolve()
     if not source.is_dir():
         raise ValueError(f"Source directory not found: {source}")
-    if source == destination or source in destination.parents or destination in source.parents:
+    if (
+        source == destination
+        or source in destination.parents
+        or destination in source.parents
+    ):
         raise ValueError("Source and destination directories must not overlap")
     return source, destination
 
 
 def _temporary_path(target, *, suffix=".partial"):
-    fd, name = tempfile.mkstemp(prefix=".clean-backup-", suffix=suffix, dir=target.parent)
+    fd, name = tempfile.mkstemp(
+        prefix=".clean-backup-", suffix=suffix, dir=target.parent
+    )
     os.close(fd)
     return Path(name)
 
@@ -118,7 +149,9 @@ def _publish(temporary, target):
     fsync_directory(target.parent)
 
 
-def verified_transfer(source, target, operation="copy", *, journal=None, collision="rename"):
+def verified_transfer(
+    source, target, operation="copy", *, journal=None, collision="rename"
+):
     """Copy, read back and publish; only then remove an unchanged Move source.
 
     A journal, when supplied, persists intent before publication and completion
@@ -139,13 +172,22 @@ def verified_transfer(source, target, operation="copy", *, journal=None, collisi
             with temporary.open("rb") as stream:
                 os.fsync(stream.fileno())
             copied = file_identity(temporary)
-            if (copied["size"], copied["sha256"]) != (original["size"], original["sha256"]):
+            if (copied["size"], copied["sha256"]) != (
+                original["size"],
+                original["sha256"],
+            ):
                 raise FileConflictError(f"Copy verification failed: {source}")
             require_identity(source, original)
             candidate = target
             counter = 0
             while True:
-                entry = journal.prepare_action(operation, source, candidate, original, copied) if journal else None
+                entry = (
+                    journal.prepare_action(
+                        operation, source, candidate, original, copied
+                    )
+                    if journal
+                    else None
+                )
                 try:
                     _publish(temporary, candidate)
                     break
@@ -156,7 +198,9 @@ def verified_transfer(source, target, operation="copy", *, journal=None, collisi
                         raise
                     counter += 1
                     tail = "" if counter == 1 else f"-{counter}"
-                    candidate = target.with_name(f"{target.stem}-{original['sha256'][:12]}{tail}{target.suffix}")
+                    candidate = target.with_name(
+                        f"{target.stem}-{original['sha256'][:12]}{tail}{target.suffix}"
+                    )
             temporary.unlink()
             # Read back once more under the final name before a Move can remove its source.
             output_identity = require_identity(candidate, copied, published=True)

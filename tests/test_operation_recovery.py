@@ -2,11 +2,65 @@
 
 from concurrent.futures import ThreadPoolExecutor
 import json
+import multiprocessing
+import os
 
 import pytest
 
 from src import file_operations as operations
 from src import undo_manager as journals
+
+
+def _crash_transfer(root, operation, stage):
+    """Exit without finally blocks to exercise the actual persisted intent."""
+    manager = journals.UndoManager(root / "journals")
+    manager.start_session()
+    if stage == "before_publication":
+        prepare = manager.prepare_action
+
+        def crash(*args):
+            prepare(*args)
+            os._exit(73)
+
+        manager.prepare_action = crash
+    elif stage == "after_publication":
+        publish = operations._publish
+
+        def crash(*args):
+            publish(*args)
+            os._exit(73)
+
+        operations._publish = crash
+    else:
+        manager.complete_action = lambda *args: os._exit(73)
+    operations.verified_transfer(
+        root / "source", root / "output", operation, journal=manager
+    )
+
+
+@pytest.mark.parametrize("operation", ["copy", "move"])
+@pytest.mark.parametrize(
+    "stage", ["before_publication", "after_publication", "before_completion"]
+)
+def test_recovery_after_process_exit(state, operation, stage):
+    source = state / "source"
+    source.write_text("original")
+    process = multiprocessing.get_context("spawn").Process(
+        target=_crash_transfer, args=(state, operation, stage)
+    )
+    process.start()
+    process.join(timeout=15)
+    if process.is_alive():
+        process.kill()
+        process.join()
+        pytest.fail("Crash probe did not exit")
+    assert process.exitcode == 73
+    manager = journals.UndoManager()
+    sessions = manager.list_sessions()
+    assert len(sessions) == 1
+    assert manager.undo_session(sessions[0]["path"])
+    assert source.read_text() == "original"
+    assert not (state / "output").exists()
 
 
 @pytest.fixture
@@ -72,6 +126,7 @@ def test_intent_failure_prevents_publication_and_source_removal(state, monkeypat
     source, target = state / "source", state / "target"
     source.write_text("keep")
     with journals.UndoManager() as manager:
+
         def full_disk():
             raise OSError("Journal disk full")
 
@@ -83,7 +138,9 @@ def test_intent_failure_prevents_publication_and_source_removal(state, monkeypat
 
 
 @pytest.mark.parametrize("operation", ["copy", "move"])
-def test_pending_intent_recovers_after_completion_write_failure(state, monkeypatch, operation):
+def test_pending_intent_recovers_after_completion_write_failure(
+    state, monkeypatch, operation
+):
     source, target = state / "source", state / "target"
     source.write_text("original")
     with journals.UndoManager() as manager:
@@ -107,7 +164,9 @@ def test_partial_undo_does_not_replay_completed_actions(state):
         path = manager.journal_path
         for name in ("a", "b"):
             (state / name).write_text(name)
-            operations.verified_transfer(state / name, state / "out" / name, "move", journal=manager)
+            operations.verified_transfer(
+                state / name, state / "out" / name, "move", journal=manager
+            )
     (state / "a").write_text("new occupant")
     assert not manager.undo_session(path)
     assert (state / "b").read_text() == "b"
@@ -121,7 +180,9 @@ def test_legacy_path_only_journal_is_preserved_for_manual_review(state):
     source, target = state / "source", state / "target"
     target.write_text("possibly edited")
     path = state / "legacy.json"
-    path.write_text(json.dumps([{"action": "move", "src": str(source), "dst": str(target)}]))
+    path.write_text(
+        json.dumps([{"action": "move", "src": str(source), "dst": str(target)}])
+    )
     assert not journals.UndoManager().undo_session(path)
     assert target.read_text() == "possibly edited"
     assert not source.exists()
@@ -161,7 +222,11 @@ def test_organizer_keeps_distinct_names_and_colliding_basenames(state, operation
     from src.organiser import organise_files
 
     source, output = state / "source", state / "out"
-    paths = [source / "a" / "photo.jpg", source / "b" / "photo.jpg", source / "a" / "photo (1).jpg"]
+    paths = [
+        source / "a" / "photo.jpg",
+        source / "b" / "photo.jpg",
+        source / "a" / "photo (1).jpg",
+    ]
     for path, color in zip(paths, ("red", "blue", "green")):
         path.parent.mkdir(parents=True, exist_ok=True)
         Image.new("RGB", (30, 30), color).save(path)

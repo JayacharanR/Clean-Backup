@@ -76,7 +76,11 @@ def test_concurrent_output_is_not_replaced_at_publication(photo, monkeypatch):
 @pytest.mark.parametrize("nested", ["same", "inside", "outside"])
 def test_directory_compression_refuses_overlapping_roots(photo, nested):
     source = photo.parent
-    output = {"same": source, "inside": source / "compressed", "outside": source.parent}[nested]
+    output = {
+        "same": source,
+        "inside": source / "compressed",
+        "outside": source.parent,
+    }[nested]
     before = photo.read_bytes()
     with pytest.raises(ValueError, match="overlap"):
         compressor.compress_files(source, output)

@@ -38,7 +38,11 @@ def _write_journal(path, actions):
 
 
 def _session_lock(path):
-    fd = os.open(str(path) + ".lock", os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    fd = os.open(
+        str(path) + ".lock",
+        os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0),
+        0o600,
+    )
     try:
         if fcntl:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -73,7 +77,9 @@ class UndoManager:
             if self.session_id is not None:
                 raise RuntimeError("An undo session is already active on this manager")
             self.journal_dir.mkdir(parents=True, exist_ok=True)
-            self.session_id = datetime.now().strftime("%Y-%m-%d_%H-%M-%S-%f") + "_" + uuid.uuid4().hex
+            self.session_id = (
+                datetime.now().strftime("%Y-%m-%d_%H-%M-%S-%f") + "_" + uuid.uuid4().hex
+            )
             self.journal_path = self.journal_dir / f"journal_{self.session_id}.json"
             self.actions = []
             self._session_fd = _session_lock(self.journal_path)
@@ -159,9 +165,17 @@ class UndoManager:
             try:
                 fd = _session_lock(path)
                 actions = json.loads(path.read_text())
-                count = sum(a.get("state") not in {"undone", "cancelled"} for a in actions)
+                count = sum(
+                    a.get("state") not in {"undone", "cancelled"} for a in actions
+                )
                 if count:
-                    sessions.append({"id": path.stem.removeprefix("journal_"), "path": path, "count": count})
+                    sessions.append(
+                        {
+                            "id": path.stem.removeprefix("journal_"),
+                            "path": path,
+                            "count": count,
+                        }
+                    )
             except (OSError, ValueError, TypeError):
                 continue
             finally:
@@ -174,13 +188,17 @@ class UndoManager:
         identity = file_identity(entry["src"])
         expected = entry.get("source_identity") or entry.get("output_identity")
         if not expected or any(identity[k] != expected[k] for k in ("sha256", "size")):
-            raise FileConflictError("The original copy source is missing or changed; retaining the output")
+            raise FileConflictError(
+                "The original copy source is missing or changed; retaining the output"
+            )
 
     def _undo_entry(self, entry, save):
         action, src, dst = entry["action"], Path(entry["src"]), Path(entry["dst"])
         expected = entry.get("output_identity")
         if action not in {"copy", "move"} or not expected:
-            raise FileConflictError("Journal has no supported, verified output identity; manual review required")
+            raise FileConflictError(
+                "Journal has no supported, verified output identity; manual review required"
+            )
         with locked_paths(src, dst):
             if not os.path.lexists(dst):
                 if entry.get("undo_phase") == "removing":
@@ -202,7 +220,9 @@ class UndoManager:
                 elif entry.get("state") == "prepared":
                     require_identity(src, entry["source_identity"])
                 else:
-                    raise FileConflictError(f"Restore path is occupied; retaining both files: {src}")
+                    raise FileConflictError(
+                        f"Restore path is occupied; retaining both files: {src}"
+                    )
             else:
                 restored = verified_transfer(dst, src, "copy", collision="error")
                 entry["restore_identity"] = file_identity(restored)
@@ -212,7 +232,9 @@ class UndoManager:
             if action == "copy":
                 self._check_copy_survivor(entry)
             else:
-                require_identity(src, entry.get("restore_identity") or entry["source_identity"])
+                require_identity(
+                    src, entry.get("restore_identity") or entry["source_identity"]
+                )
             require_identity(dst, expected, published=entry.get("state") == "prepared")
             dst.unlink()
             fsync_directory(dst.parent)

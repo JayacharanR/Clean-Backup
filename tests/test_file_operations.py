@@ -23,12 +23,16 @@ def test_processes_cannot_replace_colliding_targets(tmp_path, operation):
     with ProcessPoolExecutor(max_workers=3) as pool:
         results = list(pool.map(_transfer, [(s, target, operation) for s in sources]))
     assert len(set(results)) == len(sources)
-    assert {Path(p).read_bytes() for p in results} == {bytes([n]) * 4096 for n in range(6)}
+    assert {Path(p).read_bytes() for p in results} == {
+        bytes([n]) * 4096 for n in range(6)
+    }
     assert all(s.exists() == (operation == "copy") for s in sources)
 
 
 @pytest.mark.parametrize("failure", ["disk_full", "corrupt_copy", "changed_source"])
-def test_failed_transfer_keeps_source_and_never_publishes(tmp_path, monkeypatch, failure):
+def test_failed_transfer_keeps_source_and_never_publishes(
+    tmp_path, monkeypatch, failure
+):
     source, target = tmp_path / "source", tmp_path / "output" / "file.jpg"
     source.write_bytes(b"original content")
     real_copy = shutil.copy2
@@ -89,7 +93,9 @@ def test_unsupported_publication_fails_without_losing_source(tmp_path, monkeypat
     assert not list(tmp_path.glob(".clean-backup-*"))
 
 
-def test_move_source_is_retained_if_it_changes_during_publication(tmp_path, monkeypatch):
+def test_move_source_is_retained_if_it_changes_during_publication(
+    tmp_path, monkeypatch
+):
     source, target = tmp_path / "source", tmp_path / "target"
     source.write_text("original")
     publish = operations._publish
