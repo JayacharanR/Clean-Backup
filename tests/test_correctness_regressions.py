@@ -187,3 +187,31 @@ def test_demo_reset_clears_the_tables_that_exist(api_module, tmp_path, monkeypat
             for table in ("media_tags", "people", "media_files", "face_embeddings")
         }
     assert counts == {"media_tags": 0, "people": 0, "media_files": 0, "face_embeddings": 0}
+
+
+def test_model_download_verifies_checksums(tmp_path, monkeypatch):
+    import hashlib
+
+    from src.classify.models import download_models as models
+
+    good, bad = b"expected model bytes", b"tampered model bytes"
+    monkeypatch.setattr(models, "MODELS_DIR", tmp_path)
+    monkeypatch.setattr(models, "MODELS", [
+        ("good.onnx", "https://example.invalid/good", hashlib.sha256(good).hexdigest()),
+        ("bad.onnx", "https://example.invalid/bad", hashlib.sha256(good).hexdigest()),
+    ])
+
+    def fake_fetch(url, destination):
+        with open(destination, "wb") as stream:
+            stream.write(good if url.endswith("good") else bad)
+
+    monkeypatch.setattr(models.urllib.request, "urlretrieve", fake_fetch)
+    (tmp_path / "bad.onnx").write_bytes(b"stale local copy")
+
+    assert models.download_models() is False
+    assert (tmp_path / "good.onnx").read_bytes() == good
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["good.onnx"]
+
+    monkeypatch.setattr(models.urllib.request, "urlretrieve", lambda *a: pytest.fail("verified file re-downloaded"))
+    monkeypatch.setattr(models, "MODELS", models.MODELS[:1])
+    assert models.download_models() is True

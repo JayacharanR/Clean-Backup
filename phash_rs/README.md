@@ -4,10 +4,11 @@ Fast perceptual image hashing library written in Rust with Python bindings.
 
 ## Features
 
-- **Three hash algorithms:**
-  - `aHash` (Average Hash) - Fast, good for identical images
-  - `dHash` (Difference Hash) - Good balance of speed and accuracy  
-  - `pHash` (Perceptual Hash) - Most robust, uses DCT
+- **DCT-based pHash** (64-bit), robust to resizing, recompression and format changes
+- **Formats:** JPEG, PNG, GIF, BMP, TIFF and WebP (other codecs are not compiled in)
+- **One decode per image**: hash and resolution are computed together, and
+  grouping works on those results without reopening files
+- **Releases the GIL** while hashing, so other Python threads keep running
 
 - **Parallel processing** using Rayon for multi-core systems
 - **Pure Python fallback** if Rust extension is unavailable
@@ -60,7 +61,7 @@ maturin develop --release
 import phash_rs
 
 # Compute hash of single image
-hash = phash_rs.compute_hash("image.jpg", algorithm="phash")
+hash = phash_rs.compute_hash("image.jpg")
 print(f"Hash: {hash}")
 
 # Compare two images
@@ -75,7 +76,11 @@ for group in duplicates:
     print(f"Best quality: {group['best']}")
 
 # Batch hash computation (parallel)
-hashes = phash_rs.compute_hashes_parallel(paths, algorithm="phash")
+hashes = phash_rs.compute_hashes_parallel(paths)
+
+# Hash in batches (e.g. to report progress), then group without re-reading files
+hashed = phash_rs.compute_hashes_with_resolution(paths)   # {path: (hash, width*height)}
+groups = phash_rs.group_hashes([(p, h, res) for p, (h, res) in hashed.items()], threshold=10)
 ```
 
 ### Using the Python Wrapper

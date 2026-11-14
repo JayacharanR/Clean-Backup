@@ -138,6 +138,18 @@ def test_delete_rejects_malformed_entries_without_crashing(client, tmp_path):
     assert body["deleted_count"] == 0 and len(body["errors"]) == 3
 
 
+@pytest.mark.parametrize("mode", ["trash", "permanent"])
+def test_delete_only_accepts_images(client, tmp_path, mode):
+    source = scanned_library(client, tmp_path)
+    document = source / "taxes.pdf"
+    document.write_bytes(b"%PDF-1.7 not a duplicate photo")
+    body = client.post("/api/duplicates/delete", json={
+        "selected_images": [{"path": str(document)}], "mode": mode, "confirm_text": "DELETE",
+    }).get_json()
+    assert body["deleted_count"] == 0 and "Not an image" in body["errors"][0]
+    assert document.exists()
+
+
 def test_trash_never_replaces_an_earlier_trashed_file(client, api_module, tmp_path, monkeypatch):
     source = scanned_library(client, tmp_path)
     target = source / "a.jpg"

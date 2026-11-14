@@ -29,7 +29,7 @@ The performance-critical image hashing is written in **Rust** (`phash_rs`), the 
 Run the full stack with zero setup:
 
 ```bash
-docker run -p 8080:8080 -v ~/Photos:/data/media ghcr.io/jayacharanr/clean-backup:latest
+docker run -p 127.0.0.1:8080:8080 -v ~/Photos:/data/media ghcr.io/jayacharanr/clean-backup:latest
 ```
 
 Then open [http://localhost:8080](http://localhost:8080).
@@ -44,6 +44,16 @@ cp .env.example .env
 # Start everything
 docker compose up -d
 ```
+
+### Network access
+
+The web UI has **no login**. Anyone who can reach it can scan, move and delete files in the mounted library, so by default it is reachable only from the machine it runs on:
+
+- `python main.py --web` listens on `127.0.0.1` (override with `CLEAN_BACKUP_HOST`).
+- `docker compose` publishes the port on `127.0.0.1` (override with `CLEAN_BACKUP_BIND=0.0.0.0` on a network you trust).
+- Requests are accepted only when addressed to `localhost`, an IP address, or a hostname listed in `CLEAN_BACKUP_ALLOWED_HOSTS` (comma-separated, e.g. `nas.local`). State-changing requests from other websites are refused.
+
+Do not expose it to the internet. To reach it remotely, put it behind a VPN or an authenticating reverse proxy.
 
 ## Architecture
 
@@ -72,7 +82,7 @@ flowchart TB
 
     subgraph Cloud["Cloud Sync · optional"]
         GDrive["Google Drive"]
-        S3["AWS S3"]
+        S3["AWS S3 · planned"]
     end
 
     UI <-->|polling| API
@@ -93,36 +103,36 @@ flowchart TB
 - **Rust-accelerated pHash**: DCT-based perceptual hashing detects visual duplicates even after resize, recompression, or format conversion — not just byte-identical files.
 - **Parallel hash computation**: Leverages Rayon's work-stealing thread pool in Rust for concurrent image hashing (`par_iter`), with automatic CPU core utilization.
 - **Tunable sensitivity**: Hamming distance threshold from exact-match (0) to aggressive (10+), persisted between sessions.
-- **Name-based detection**: Catches OS-generated duplicates (`file (1).jpg`, `file - Copy.jpg`) across Windows, macOS, and Linux patterns.
+- **No name-based guessing**: files such as `photo (1).jpg` or `photo - Copy.jpg` are never dropped because of their names; only content decides, and organization keeps every named variant.
 - **Safe review UI**: Grouped duplicate cards with side-by-side comparison, modal full-resolution preview, keyboard navigation, and protected best-image rules.
 
 ### Performance & Parallelization
 
-Clean-Backup uses a **two-layer parallelization architecture** to maximize throughput:
+Hashing is parallel in Rust; file transfers favour verification over raw speed:
 
 | Layer | Technology | What it parallelizes |
 |-------|-----------|---------------------|
 | **Rust (native threads)** | Rayon work-stealing thread pool | Image decoding, DCT hash computation, Hamming distance comparisons |
-| **Python (process pool)** | `multiprocessing.Pool` (N-1 cores) | File I/O, EXIF extraction, copy/move operations, compression |
+| **Python (thread pool)** | `ThreadPoolExecutor` (up to 8 workers) | EXIF / video metadata extraction while organizing. Each copy or move is verified (SHA-256 read-back) and published one at a time. |
 
 - **Rayon `par_iter()` in Rust**: `find_duplicates_parallel()` and `compute_hashes_parallel()` use Rayon's data-parallel iterators to distribute image hashing across all CPU cores. Each image is independently decoded, resized, DCT-transformed, and hashed — a perfectly parallelizable workload.
-- **Python multiprocessing for file operations**: The organizer spawns `cpu_count() - 1` worker processes (typically 15 on a 16-core machine) to handle concurrent file copies, moves, and metadata extraction.
-- **10× speedup over pure Python**: The Rust pHash engine with Rayon multi-threading outperforms equivalent Python (Pillow + imagehash) implementations by an order of magnitude on batch duplicate scanning.
-- **PyO3/Maturin bridge**: Rust functions are exposed as native Python functions via PyO3 with abi3 cross-version compatibility, achieving zero-copy data transfer for hash results.
+- **One decode per image**: a scan computes each image's hash and resolution from a single decode and groups those results without touching the files again. On a 320-image, 6-megapixel JPEG test library this cut a web scan from 6.0 s to 2.8 s with identical results.
+- **Responsive during scans**: hashing releases Python's GIL, so progress polling is served while Rust works. A pure-Python fallback is used automatically if the extension is not built (much slower).
+- **PyO3/Maturin bridge**: Rust functions are exposed as native Python functions via PyO3 with abi3 cross-version compatibility.
 
 ### Organization & Classification
 - **Date-based organization**: Extracts EXIF `DateTimeOriginal`, video container metadata, and filesystem stats to sort into `Year/Month` hierarchies.
-- **AI scene classification**: MobileNetV3 ONNX model tags photos into 15 categories (travel, food, nature, documents, etc.) with configurable confidence thresholds.
+- **AI scene classification**: MobileNetV2 ONNX model tags photos into 15 categories (travel, food, nature, documents, etc.) with configurable confidence thresholds.
 - **Face detection & recognition**: YuNet face detection + ArcFace embeddings for automatic face grouping. Name people once, and the system recognizes them across your library.
 - **Review queue**: Low-confidence classifications and unresolved face matches are surfaced for human review before any files move.
 
 ### Compression
 - Three compression levels (high quality → maximum compression) for both images and videos.
-- Parallel processing using all CPU cores. H.264 + AAC for video, libjpeg-turbo for JPEG.
+- Files are processed one at a time. H.264 + AAC for video (requires FFmpeg), Pillow/libjpeg for JPEG. Outputs never replace the source or an existing file.
 - Detailed per-file analytics with compression ratios and space savings.
 
 ### Cloud Sync
-- **Provider-agnostic**: Google Drive (OAuth2) and AWS S3 support via a pluggable `CloudProvider` interface.
+- **Pluggable providers**: Google Drive (OAuth2) is implemented behind a `CloudProvider` interface. AWS S3 is a placeholder and not functional yet.
 - **Manifest-based incremental sync**: SHA-256 content hashing ensures only changed files are uploaded.
 - **Secure credential storage**: OS keyring integration with Fernet-encrypted fallback.
 - **Undo support**: Synced files can be removed from the cloud provider via the undo system.
@@ -135,22 +145,22 @@ Clean-Backup uses a **two-layer parallelization architecture** to maximize throu
 ### Web Control Panel
 - **Complete workflow tabs**: Duplicates, Organize, Compression, Classify, People, Review, Cloud Sync, Watchers, and Settings.
 - **Background job execution**: Long-running operations run asynchronously with live progress polling.
-- **Transactional undo**: Every file operation is journaled. Full session rollback with crash recovery.
-- **Undo observability**: Session filtering, JSON export for auditing and recovery workflows.
+- **Journaled undo**: organize, classification apply and Trash operations are recorded in an append-only journal before they take effect, and can be rolled back per session. Permanent deletion and compression outputs are not undoable.
+- **Undo history**: sessions can be filtered and reverted individually; conflicts (edited or missing files) are kept and reported instead of overwritten.
 
 ## Tech Stack
 
 | Layer | Technology |
 |-------|-----------|
 | **Performance-critical hashing** | Rust (2021 Edition) + Rayon thread pool via `maturin`/PyO3 |
-| **Parallelization** | Rayon (Rust work-stealing threads) + Python `multiprocessing.Pool` |
+| **Parallelization** | Rayon (Rust work-stealing threads) + Python `ThreadPoolExecutor` |
 | **Backend & ML pipeline** | Python 3.12+, Flask, ONNX Runtime |
 | **Frontend** | React + Vite |
 | **Database** | SQLite (WAL mode) |
-| **ML models** | MobileNetV3 (scene), YuNet (face detect), ArcFace (face embed) |
+| **ML models** | MobileNetV2 (scene), YuNet (face detect), ArcFace (face embed) |
 | **Image processing** | Pillow, pillow-heif (HEIC), OpenCV |
 | **Video metadata** | hachoir, FFmpeg (compression) |
-| **Cloud providers** | Google Drive API, AWS S3 (boto3) |
+| **Cloud providers** | Google Drive API (AWS S3 planned) |
 | **Containerization** | Docker (multi-stage build) |
 
 ## Local Development
@@ -184,6 +194,8 @@ python main.py        # CLI mode
 python main.py --web  # Web GUI at http://localhost:8080
 ```
 
+Classification models (about 275 MB) are not in the repository. Fetch and checksum-verify them once with `python -m src.classify.models.download_models`; without them the classifier falls back to metadata-only heuristics.
+
 ### Checks
 
 After completing local setup, install the development tools and run the same checks as CI:
@@ -197,13 +209,17 @@ cargo clippy --manifest-path phash_rs/Cargo.toml --locked -- -D warnings
 cargo test --manifest-path phash_rs/Cargo.toml --locked
 ```
 
-The Python tests use disposable media, configuration, databases, and undo journals. They require the compiled Rust module and exercise duplicate scanning, image previews, date-based copy/move organization, undo, demo-mode restrictions, and input validation. CI also builds and starts the Docker image, checks its Rust backend health response, and verifies that it serves the frontend. Test failures fail the workflow.
+The Python tests use disposable media, configuration, databases, and undo journals. They require the compiled Rust module and exercise duplicate scanning, image previews, date-based copy/move organization, classification apply, undo and crash recovery, the API's cross-origin and host checks, demo-mode restrictions, and input validation. CI also builds and starts the Docker image, checks its Rust backend health response, and verifies that it serves the frontend. Test failures fail the workflow.
 
 ## Privacy
 
-Clean-Backup runs **100% offline**. All machine learning models (ONNX) are baked into the Docker image and require no cloud API calls. Face embeddings and classification tags are stored only in your local SQLite database. No telemetry, no analytics, no data leaves your machine.
+Clean-Backup processes your library locally. The machine learning models (ONNX) are downloaded once at image build time, verified against pinned checksums, and need no cloud API calls at runtime. Face embeddings and classification tags are stored only in your local SQLite database. No telemetry, no analytics, no data leaves your machine.
 
 Cloud sync is entirely optional and user-initiated — credentials are stored in your OS keyring or encrypted locally.
+
+## Audit
+
+The most recent engineering audit — findings, fixes, measurements and what remains open — is in [docs/AUDIT_REPORT.md](docs/AUDIT_REPORT.md).
 
 ## License
 

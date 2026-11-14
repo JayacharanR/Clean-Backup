@@ -3,6 +3,13 @@
 This first repair phase addresses the local file-operation and recovery problems
 in the 13 November 2026 audit. Findings outside this phase remain open.
 
+> **Update, 14 November 2026.** A follow-up audit closed several items listed
+> under "Current limits" below: the API's origin and host boundaries (F09, short
+> of authentication), verified model downloads (part of F37), migration of
+> Trash and classification apply to the verified executor, and job outcome
+> reporting for apply and cloud jobs (F17). Journals are now append-only logs.
+> See [AUDIT_REPORT.md](AUDIT_REPORT.md) for details and the current open list.
+
 | Finding | Progress |
 | --- | --- |
 | F01: filename-based omission | Organization retains named variants. The legacy detection helper compares full content digests instead of name patterns. |

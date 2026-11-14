@@ -905,6 +905,11 @@ def api_delete_selected():
                 if not file_path.is_file():
                     errors.append(f"Not a file: {file_path}")
                     continue
+                # Duplicate review only ever lists images; refuse anything else
+                # that happens to sit under a scanned folder.
+                if file_path.suffix.lower() not in IMAGE_EXTENSIONS:
+                    errors.append(f"Not an image: {file_path}")
+                    continue
 
                 if mode == "trash":
                     # Verified, journaled move: works across filesystems, never
