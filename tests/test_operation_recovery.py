@@ -4,8 +4,6 @@ from concurrent.futures import ThreadPoolExecutor
 import json
 import multiprocessing
 import os
-from contextlib import nullcontext
-from types import SimpleNamespace
 
 import pytest
 
@@ -289,12 +287,6 @@ def test_legacy_classification_releases_journal_on_return_or_error(
         lambda _: [
             {"path": str(source), "category_label": "example"},
         ],
-    )
-    cursor = SimpleNamespace(execute=lambda *args: None, fetchone=lambda: None)
-    monkeypatch.setattr(
-        apply_org,
-        "_get_conn",
-        lambda: nullcontext(SimpleNamespace(cursor=lambda: cursor)),
     )
 
     def failed_callback(*args):

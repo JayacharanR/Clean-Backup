@@ -235,8 +235,8 @@ def _python_compute_hash(
     try:
         from PIL import Image
         
-        img = Image.open(path).convert('L')  # Grayscale
-        return _python_phash(img, hash_size)
+        with Image.open(path) as source:
+            return _python_phash(source.convert('L'), hash_size)  # Grayscale
     except Exception as e:
         logger.debug(f"Python hash failed for {path}: {e}")
         return None

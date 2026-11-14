@@ -1,5 +1,3 @@
-from pathlib import Path
-from datetime import datetime
 from src.organiser import organise_files, print_summary
 from src.duplicate_handler import handle_duplicates, print_duplicate_report
 from src.undo_manager import undo_manager
@@ -62,57 +60,11 @@ def main():
              if target_session:
                  confirm = input(f"Are you sure you want to revert {target_session['count']} actions from {target_session['id']}? (y/n): ")
                  if confirm.lower() == 'y':
-                     undo_manager.undo_session(target_session['path'])
-                     print("\n✅ Undo operation completed")
-                     
-                     # Ask about Google Drive sync
-                     sync_choice = input("\n☁️  Backup restored files to Google Drive? (y/n): ").strip().lower()
-                     if sync_choice == 'y':
-                         try:
-                             from src.gdrive_sync import GoogleDriveSync, print_sync_summary, is_gdrive_available
-                             import json
-                             
-                             if not is_gdrive_available():
-                                 print("\n❌ Google Drive support not installed")
-                                 print("Install with: uv pip install google-auth google-auth-oauthlib google-auth-httplib2 google-api-python-client")
-                             else:
-                                 # Read session file to get source directories
-                                 with open(target_session['path'], 'r') as f:
-                                     actions = json.load(f)
-                                 
-                                 # Extract unique source directories
-                                 source_dirs = set()
-                                 for entry in actions:
-                                     src_path = Path(entry.get('src', ''))
-                                     if src_path.exists() and src_path.parent.exists():
-                                         # Get parent directory
-                                         source_dirs.add(src_path.parent)
-                                 
-                                 if source_dirs:
-                                     # Use the most common parent directory
-                                     source_dir = min(source_dirs, key=lambda p: len(p.parts))
-                                     
-                                     print(f"\n📁 Syncing directory: {source_dir}")
-                                     print("🔐 Authenticating with Google Drive...")
-                                     sync = GoogleDriveSync()
-                                     
-                                     backup_name = f"Restored_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                                     stats_sync = sync.sync_directory(source_dir, backup_name)
-                                     print_sync_summary(stats_sync)
-                                 else:
-                                     print("❌ No source directories found to sync")
-                         except FileNotFoundError as e:
-                             print(f"\n❌ {e}")
-                             print("\nSetup instructions:")
-                             print("1. Go to https://console.cloud.google.com/")
-                             print("2. Create a new project")
-                             print("3. Enable Google Drive API")
-                             print("4. Create OAuth 2.0 credentials (Desktop app)")
-                             print("5. Download credentials.json to project root")
-                         except Exception as e:
-                             print(f"\n❌ Sync failed: {e}")
-                             from src.logger import logger
-                             logger.error(f"Google Drive sync error: {e}")
+                     if undo_manager.undo_session(target_session['path']):
+                         print("\n✅ Undo operation completed")
+                     else:
+                         print("\n⚠️  Some actions could not be reverted and were left in place.")
+                         print("   Check the log, then retry the same session.")
              else:
                  print("Invalid selection.")
              
@@ -131,8 +83,8 @@ def main():
                     print("❌ Threshold cannot be negative. Setting to 0.")
                     val = 0
                 elif val > 25:
-                    print("❌ Threshold too high (max 64). Setting to 15.")
-                    val = 15
+                    print("❌ Threshold too high (max 25). Setting to 25.")
+                    val = 25
                 
                 current_threshold = val
                 src.config.save_config("phash_threshold", val)
@@ -209,42 +161,6 @@ def main():
                 print_summary(stats, operation)
                 
                 print("Check logs for detailed information!")
-                
-                # Ask about Google Drive sync
-                sync_choice = input("\n☁️  Backup organized files to Google Drive? (y/n): ").strip().lower()
-                if sync_choice == 'y':
-                    try:
-                        from src.gdrive_sync import GoogleDriveSync, print_sync_summary, is_gdrive_available
-                        
-                        if not is_gdrive_available():
-                            print("\n❌ Google Drive support not installed")
-                            print("Install with: uv pip install google-auth google-auth-oauthlib google-auth-httplib2 google-api-python-client")
-                        else:
-                            dest_path = Path(destination)
-                            if dest_path.exists():
-                                print("\n🔐 Authenticating with Google Drive...")
-                                sync = GoogleDriveSync()
-                                
-                                backup_name = input("Backup folder name (press Enter for timestamp): ").strip()
-                                if not backup_name:
-                                    backup_name = f"Organized_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                                
-                                stats_sync = sync.sync_directory(dest_path, backup_name)
-                                print_sync_summary(stats_sync)
-                            else:
-                                print("❌ Destination folder not found")
-                    except FileNotFoundError as e:
-                        print(f"\n❌ {e}")
-                        print("\nSetup instructions:")
-                        print("1. Go to https://console.cloud.google.com/")
-                        print("2. Create a new project")
-                        print("3. Enable Google Drive API")
-                        print("4. Create OAuth 2.0 credentials (Desktop app)")
-                        print("5. Download credentials.json to project root")
-                    except Exception as e:
-                        print(f"\n❌ Sync failed: {e}")
-                        from src.logger import logger
-                        logger.error(f"Google Drive sync error: {e}")
             else:
                 print("Source and Destination paths are required.")
             continue

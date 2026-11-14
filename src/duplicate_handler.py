@@ -260,9 +260,11 @@ def _handle_duplicates(source_dir, duplicates_dir, action, threshold, keep_best,
     # Find duplicates
     groups = scan_for_duplicates(source_dir, threshold)
     
-    # Calculate statistics
-    total_scanned = sum(len(list(source_path.rglob(f'*{ext}'))) 
-                       for ext in ['.jpg', '.jpeg', '.png', '.heic', '.bmp', '.tiff', '.gif'])
+    # Calculate statistics (one walk; same extension rule as the scanner)
+    total_scanned = sum(
+        1 for p in source_path.rglob('*')
+        if p.suffix.lower() in constants.IMAGE_EXTENSIONS and p.is_file()
+    )
     total_duplicates = sum(len(g.paths) - 1 for g in groups)  # -1 for keeping best
     
     # Calculate recoverable space
