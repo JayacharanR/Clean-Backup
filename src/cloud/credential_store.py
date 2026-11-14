@@ -14,7 +14,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import stat
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -37,6 +36,15 @@ except Exception:
     _USE_KEYRING = False
 
 
+def _write_private(path: Path, data: bytes) -> None:
+    """Write *data* to a file that is owner-only from the moment it exists."""
+    temporary = path.with_name(path.name + ".tmp")
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "wb") as stream:
+        stream.write(data)
+    os.replace(temporary, path)
+
+
 def _get_fernet():
     """Return a ``Fernet`` instance, creating the key file if needed."""
     from cryptography.fernet import Fernet
@@ -44,8 +52,7 @@ def _get_fernet():
     _KEY_DIR.mkdir(parents=True, exist_ok=True)
     if not _KEY_FILE.exists():
         key = Fernet.generate_key()
-        _KEY_FILE.write_bytes(key)
-        os.chmod(str(_KEY_FILE), stat.S_IRUSR | stat.S_IWUSR)  # 0600
+        _write_private(_KEY_FILE, key)
         logger.info("Generated new Fernet key at %s", _KEY_FILE)
     return Fernet(_KEY_FILE.read_bytes())
 
@@ -60,10 +67,7 @@ def store(account_id: str, data: dict) -> None:
         logger.info("Stored credentials for %s via keyring", account_id)
     else:
         fernet = _get_fernet()
-        encrypted = fernet.encrypt(payload.encode()).decode()
-        cred_file = _KEY_DIR / f"{account_id}.enc"
-        cred_file.write_text(encrypted)
-        os.chmod(str(cred_file), stat.S_IRUSR | stat.S_IWUSR)
+        _write_private(_KEY_DIR / f"{account_id}.enc", fernet.encrypt(payload.encode()))
         logger.info("Stored credentials for %s via Fernet fallback", account_id)
 
 

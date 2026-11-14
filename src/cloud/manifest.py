@@ -65,6 +65,9 @@ def create_sync_run(account_id: int, config: dict) -> int:
 
 def update_sync_run(run_id: int, **fields) -> None:
     """Update fields on a sync run (status, started_at, completed_at, etc.)."""
+    unknown = set(fields) - {"status", "started_at", "completed_at"}
+    if unknown:
+        raise ValueError(f"Unknown sync run fields: {sorted(unknown)}")
     conn = _get_conn()
     sets = ", ".join(f"{k} = ?" for k in fields)
     vals = list(fields.values()) + [run_id]

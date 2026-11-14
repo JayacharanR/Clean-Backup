@@ -139,10 +139,21 @@ def add_config(
     return cur.lastrowid
 
 
+# Column names are interpolated into SQL, so only these may be updated.
+UPDATABLE_FIELDS = frozenset({
+    "label", "watch_path", "recursive", "stability_window_seconds",
+    "ignore_patterns", "pipeline", "on_complete", "on_error", "enabled",
+})
+
+
 def update_config(config_id: int, **kwargs: Any) -> bool:
     if not kwargs:
         return True
-        
+
+    unknown = set(kwargs) - UPDATABLE_FIELDS
+    if unknown:
+        raise ValueError(f"Unknown watcher fields: {sorted(map(str, unknown))}")
+
     set_clauses = []
     values = []
     for k, v in kwargs.items():

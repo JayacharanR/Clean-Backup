@@ -28,3 +28,22 @@ credentials.json
 # Ignore media directories if running locally
 photos/
 test/
+
+# Never bake local settings, secrets or working data into the image
+.env
+.env.*
+!.env.example
+logs/
+d/
+s/
+
+# Not needed at runtime
+.github/
+.pytest_cache/
+.ruff_cache/
+docs/
+tests/
+interview-prep/
+requirements-dev.txt
+explanation.md
+todo.md
