@@ -1,0 +1,3 @@
+# Keep local verification and GitHub Actions on the same tool versions.
+ruff==0.15.22
+pytest==9.0.2

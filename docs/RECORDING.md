@@ -1,62 +1,66 @@
-# Recording the Demo GIF
+# Demo GIF
 
-## Overview
+[`demo.gif`](demo.gif) is a looping, 32-second walkthrough made from eight screen captures of the running React/Flask app. The captures show real operations on a separate sample library, database, configuration directory, and undo journal. Captions and pauses were added for readability; the app results were not altered.
 
-The demo GIF should be a 30–45 second screen capture showing:
-1. Drop/select photos → dedupe review UI with card/modal duplicate comparison
-2. Classify wizard → job running with stage progress
-3. People page naming an unidentified face
-4. An undo action reverting a change
+## What the recording shows
 
-## Tools
+1. **Scan:** nine JPEGs are hashed by the Rust `phash_rs` backend. The scan finds three groups and six duplicates at sensitivity 10.
+2. **Review:** compare duplicate cards and open the image preview. Each group contains an original, a half-resolution copy, and a recompressed copy.
+3. **Organize:** copy all nine images into `2025/March`, `2025/April`, and `2025/May`, using their EXIF dates. The app reports nine processed images and zero errors. Duplicate checks are unchecked for this step so every sample is copied.
+4. **Undo:** revert the session containing nine copy operations. Filesystem checks confirmed that all nine output copies were removed and all nine source images remained intact.
 
-| Platform | Tool | Notes |
-|----------|------|-------|
-| Linux | [Peek](https://github.com/phw/peek) or [SimpleScreenRecorder](https://www.maartenbaert.be/simplescreenrecorder/) | Peek outputs GIF directly |
-| macOS | `Cmd+Shift+5` or [Kap](https://getkap.co/) | Kap outputs GIF/MP4 |
-| Cross-platform | [OBS Studio](https://obsproject.com/) | Outputs MP4, convert to GIF below |
+This recording covers local deduplication, review, organization, and undo. It does not demonstrate classification, face recognition, or cloud sync.
 
-## Steps
+## Sample images
 
-1. Start the app with populated data:
-   ```bash
-   DEMO_MODE=true python main.py --web
-   ```
+The sample library uses these Pexels photos, downloaded under the [Pexels License](https://www.pexels.com/license/):
 
-2. Open `http://localhost:8080` in a browser with a clean window (no bookmarks bar).
+| Local filename | Source |
+|---|---|
+| `mountains.jpg` | [Pexels photo 3278215](https://www.pexels.com/photo/3278215/) |
+| `food.jpg` | [Pexels photo 1640777](https://www.pexels.com/photo/1640777/) |
+| `puppies.jpg` | [Pexels photo 1108099](https://www.pexels.com/photo/1108099/) |
 
-3. Record the sequence above in one take.
+Each original was saved at JPEG quality 94 with an EXIF `DateTimeOriginal` of March 15, April 15, or May 15, 2025. Pillow produced a half-resolution variant at quality 72 and a full-resolution variant at quality 32. No personal media or cloud credentials were used.
 
-4. Convert to optimized GIF (if recording was MP4):
-   ```bash
-   # Generate palette for high-quality GIF
-   ffmpeg -i recording.mp4 -vf "fps=12,scale=960:-1:flags=lanczos,palettegen" palette.png
+## Re-record locally
 
-   # Convert using palette
-   ffmpeg -i recording.mp4 -i palette.png -lavfi "fps=12,scale=960:-1:flags=lanczos [x]; [x][1:v] paletteuse" -loop 0 docs/demo.gif
-   ```
+Complete the [local setup](../README.md#local-development), build the frontend, and prepare a disposable sample folder containing the photos and variants above. Use absolute paths for the following environment variables. Run from the disposable directory so relative log and undo files also stay separate:
 
-5. Speed up slow sections (optional):
-   ```bash
-   ffmpeg -i recording.mp4 -filter:v "setpts=0.5*PTS" -an fast.mp4
-   ```
-
-6. Verify size is under 10MB:
-   ```bash
-   ls -lh docs/demo.gif
-   ```
-
-7. Uncomment the GIF embed in README.md:
-   ```markdown
-   ![Demo](docs/demo.gif)
-   ```
-
-## Alternative: MP4
-
-GitHub renders MP4 natively in README files. If the GIF is too large, use MP4:
-
-```markdown
-https://github.com/user-attachments/assets/<upload-id>
+```bash
+# Set this to the absolute path of your clone.
+REPO=/absolute/path/to/Clean-Backup
+CAPTURE_DIR=$(mktemp -d /tmp/clean-backup-demo.XXXXXX)
+mkdir -p "$CAPTURE_DIR/library" "$CAPTURE_DIR/organized" "$CAPTURE_DIR/config"
+# Put the sample photos and variants into "$CAPTURE_DIR/library".
+cd "$CAPTURE_DIR"
+CLEAN_BACKUP_DB_PATH="$CAPTURE_DIR/showcase.db" \
+CLEAN_BACKUP_CONFIG_DIR="$CAPTURE_DIR/config" \
+CLEAN_BACKUP_PORT=8080 \
+"$REPO/.venv/bin/python" "$REPO/main.py" --web
 ```
 
-Upload via GitHub's web UI (drag & drop into an issue/PR, copy the URL).
+Open `http://localhost:8080`. Use the sample library for **Duplicates**, inspect a group and its preview, then use **Organize** with **Copy** and the disposable `organized` destination. Check the completed summary, open **Undo History**, and revert that sample session. Do not set `DEMO_MODE=true`: the read-only deployment mode blocks organization and undo.
+
+Capture the eight states listed above at a consistent desktop viewport. The committed GIF uses 960 × 660 pixels including its caption strip, eight frames with pauses of 3, 4.5, 5, 4, 3.5, 4.5, 3.5, and 4 seconds, and an infinite loop. It is under 1 MB and uses a repository-relative Markdown image link so it displays directly on GitHub.
+
+Verify a replacement before committing it:
+
+```python
+from pathlib import Path
+from PIL import Image
+
+path = Path("docs/demo.gif")
+with Image.open(path) as gif:
+    assert gif.is_animated and gif.n_frames == 8
+    assert gif.info["loop"] == 0
+    assert gif.size == (960, 660)
+    duration = 0
+    for index in range(gif.n_frames):
+        gif.seek(index)
+        duration += gif.info["duration"]
+    assert duration == 32000
+assert path.stat().st_size < 1_000_000
+```
+
+Inspect every frame visually as well. Confirm that images load, text remains legible, the results match the operations, and the output directory is empty after undo.
