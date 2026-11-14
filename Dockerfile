@@ -3,14 +3,15 @@ FROM rust:slim AS rust-builder
 
 WORKDIR /build
 # Install build dependencies if needed (e.g. for maturin or setuptools-rust)
-RUN apt-get update && apt-get install -y python3 python3-pip python3-venv curl
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip python3-venv \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY phash_rs/ phash_rs/
 WORKDIR /build/phash_rs
 # Compile the rust extension (outputs a .so or .pyd)
 # We use maturin to build a wheel, which makes it easy to install in the python image
 RUN pip install maturin --break-system-packages
-RUN maturin build --release -o dist
+RUN maturin build --release --locked -o dist
 
 # ── Stage 2: Frontend Builder ───────────────────────────────────────────
 FROM node:20-slim AS frontend-builder
@@ -30,7 +31,7 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # Install system dependencies for OpenCV and ONNX
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     libglib2.0-0 \
     curl \
@@ -44,21 +45,22 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY --from=rust-builder /build/phash_rs/dist/*.whl /tmp/
 RUN pip install --no-cache-dir /tmp/*.whl && rm -f /tmp/*.whl
 
-# Copy application source BEFORE model download so models aren't overwritten
-COPY . .
-
-# Copy frontend static build from Stage 2 (overwrites the source web/dist)
-COPY --from=frontend-builder /build/web/dist ./web/dist
-
-# Download ONNX models — runs AFTER COPY . . so models persist in the layer
-RUN python src/classify/models/download_models.py
-
-# Set up non-root user
+# Run as a non-root user. Ownership is set while copying: a later
+# `chown -R /app` would store a second copy of every file in a new layer.
 RUN useradd -m -u 1000 appuser \
     && mkdir -p /app/data/db /app/data/cache /app/data/config /data/media \
     && chown -R appuser:appuser /app /data/media
 
 USER appuser
+
+# Copy application source BEFORE model download so models aren't overwritten
+COPY --chown=appuser:appuser . .
+
+# Copy frontend static build from Stage 2 (overwrites the source web/dist)
+COPY --chown=appuser:appuser --from=frontend-builder /build/web/dist ./web/dist
+
+# Download ONNX models (checksum-verified) — runs AFTER COPY . . so they persist
+RUN python src/classify/models/download_models.py
 
 # Expose the default port
 EXPOSE 8080
@@ -68,6 +70,9 @@ ENV CLEAN_BACKUP_MEDIA_PATH=/data/media
 ENV CLEAN_BACKUP_DB_PATH=/app/data/db/clean_backup.sqlite
 ENV CLEAN_BACKUP_CONFIG_DIR=/app/data/config
 ENV CLEAN_BACKUP_PORT=8080
+# Listen on the container's interfaces; which host interface is exposed is
+# decided by the published port (docker-compose.yml defaults to loopback).
+ENV CLEAN_BACKUP_HOST=0.0.0.0
 ENV CLEAN_BACKUP_LOG_LEVEL=info
 
 # Flask entrypoint

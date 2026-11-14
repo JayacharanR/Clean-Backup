@@ -1,7 +1,7 @@
 [project]
 name = "clean-backup"
 version = "0.1.0"
-description = "Add your description here"
+description = "Local photo and video organizer with perceptual deduplication, on-device classification and journaled undo"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

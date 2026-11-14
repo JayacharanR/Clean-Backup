@@ -3,7 +3,7 @@
 //! Implements DCT-based perceptual hashing for robust duplicate detection
 //! that is resistant to resizing, format changes, and minor edits.
 
-use image::{imageops::FilterType, DynamicImage};
+use image::{imageops::FilterType, DynamicImage, GenericImageView};
 use std::path::Path;
 
 /// Hash algorithm type (only pHash supported)
@@ -35,6 +35,24 @@ impl ImageHash {
         Ok(Self::from_image(&img, algorithm, hash_size))
     }
 
+    /// Compute the hash and the pixel count (width * height) from one decode.
+    ///
+    /// Duplicate grouping needs both; decoding the file a second time just to
+    /// read its dimensions doubles the cost of a scan.
+    pub fn from_path_with_resolution<P: AsRef<Path>>(
+        path: P,
+        algorithm: HashAlgorithm,
+        hash_size: usize,
+    ) -> Result<(Self, u64), String> {
+        let img = image::open(path.as_ref()).map_err(|e| format!("Failed to open image: {}", e))?;
+        let (width, height) = img.dimensions();
+
+        Ok((
+            Self::from_image(&img, algorithm, hash_size),
+            width as u64 * height as u64,
+        ))
+    }
+
     /// Compute hash from a loaded image (uses pHash)
     pub fn from_image(img: &DynamicImage, _algorithm: HashAlgorithm, hash_size: usize) -> Self {
         Self::compute_phash(img, hash_size)
@@ -61,6 +79,13 @@ impl ImageHash {
     /// Convert hash to hex string
     pub fn to_hex(&self) -> String {
         self.bits.iter().map(|b| format!("{:02x}", b)).collect()
+    }
+
+    /// The hash as one machine word, when it is the standard 64-bit size.
+    pub fn as_u64(&self) -> Option<u64> {
+        <[u8; 8]>::try_from(self.bits.as_slice())
+            .ok()
+            .map(u64::from_be_bytes)
     }
 
     /// Compute Hamming distance to another hash
@@ -210,5 +235,14 @@ mod tests {
 
         let h3 = ImageHash::from_hex("ff00ff01").unwrap();
         assert_eq!(h1.distance(&h3), 1);
+    }
+
+    #[test]
+    fn test_word_form_matches_byte_distance() {
+        let a = ImageHash::from_hex("abcdef0123456789").unwrap();
+        let b = ImageHash::from_hex("abcdef0123450000").unwrap();
+        let (wa, wb) = (a.as_u64().unwrap(), b.as_u64().unwrap());
+        assert_eq!((wa ^ wb).count_ones(), a.distance(&b));
+        assert!(ImageHash::from_hex("ff00ff00").unwrap().as_u64().is_none());
     }
 }

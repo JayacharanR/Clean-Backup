@@ -1,92 +1,34 @@
-import shutil
-import re
 from pathlib import Path
 from collections import defaultdict
-from multiprocessing import Pool, cpu_count
+from concurrent.futures import ThreadPoolExecutor
+from multiprocessing import cpu_count
 from tqdm import tqdm
 from src import constants
 from src.metadata import get_image_date, get_video_date, get_file_modification_date
 from src.logger import logger
 from src.phash import find_duplicates_from_paths, is_rust_available, THRESHOLD_SIMILAR
-from src.undo_manager import undo_manager
+from src.undo_manager import UndoManager
+from src.file_operations import file_identity, validate_roots, verified_transfer
 
 def detect_name_based_duplicates(file_paths):
+    """Legacy API: return content-identical files, never infer identity from names.
+
+    Organization retains all inputs even when filename hints are requested. Use
+    duplicate review to decide whether a redundant copy should be omitted.
     """
-    Detect duplicate files based on common naming patterns from various OS.
-    
-    Patterns detected:
-    - Windows (Download): photo (1).jpg, photo (2).jpg
-    - Generic: photo-1.jpg, photo_1.jpg
-    - macOS (Duplicate): photo copy.jpg, photoCopy.jpg
-    - Windows (Copy): Notes - Copy.txt
-    - Linux (Nautilus): Data (copy).csv
-    - macOS (Drag/Drop): Image 2.png, Image 3.png
-    
-    Args:
-        file_paths: List of Path objects
-        
-    Returns:
-        set: Paths that should be considered duplicates (keeps original without suffix)
-    """
-    duplicate_files = set()
-    base_name_groups = defaultdict(list)
-    
-    # Regex patterns to detect duplicate suffixes (order matters - most specific first)
-    patterns = [
-        r'\s*\((\d+)\)$',                          # (1), (2) - Windows/Android/iOS downloads
-        r'\s*\(copy\)$',                           # (copy) - Linux Nautilus
-        r'\s*-\s*Copy(\d*)$',                      # - Copy, - Copy2 - Windows
-        r'\s+copy(\d*)$',                          # copy, copy2 - macOS (space before)
-        r'[-_]copy(\d*)$',                         # -copy, _copy - generic
-        r'[-_]Copy(\d*)$',                         # -Copy, _Copy - generic
-        r'[-_]COPY(\d*)$',                         # -COPY, _COPY - generic  
-        r'[-_](\d+)$',                             # -1, _1 - generic
-        r'\s+(\d+)$',                              # (space)2, (space)3 - macOS drag/drop
-    ]
-    
-    # Examples of matched patterns:
-    # "Installer (1).exe" → base: "Installer.exe"
-    # "Data (copy).csv" → base: "Data.csv"
-    # "Notes - Copy.txt" → base: "Notes.txt"
-    # "Image copy.png" → base: "Image.png"
-    # "Photo_1.jpg" → base: "Photo.jpg"
-    # "Image 2.png" → base: "Image.png"
-    
-    for file_path in file_paths:
-        if not file_path.is_file():
+    seen = {}
+    duplicates = set()
+    for path in file_paths:
+        path = Path(path)
+        if not path.is_file() or path.is_symlink():
             continue
-            
-        stem = file_path.stem  # filename without extension
-        suffix = file_path.suffix
-        
-        # Try to extract base name by removing duplicate suffixes
-        base_name = stem
-        is_duplicate = False
-        
-        for pattern in patterns:
-            match = re.search(pattern, stem, re.IGNORECASE)
-            if match:
-                # Remove the duplicate suffix to get base name
-                base_name = re.sub(pattern, '', stem, flags=re.IGNORECASE)
-                is_duplicate = True
-                break
-        
-        # Group files by base name + extension
-        key = f"{base_name}{suffix}".lower()
-        base_name_groups[key].append((file_path, is_duplicate, stem))
-    
-    # Analyze groups to find duplicates
-    for base_key, files in base_name_groups.items():
-        if len(files) > 1:
-            # Sort: originals (no suffix) first, then by name
-            files.sort(key=lambda x: (x[1], x[2]))  # (is_duplicate, stem)
-            
-            # Keep the first file (original without suffix), mark rest as duplicates
-            for file_path, is_dup, stem in files[1:]:
-                duplicate_files.add(file_path)
-                logger.info(f"Name-based duplicate detected: {file_path.name} (base: {base_key})")
-    
-    return duplicate_files
+        identity = file_identity(path)
+        key = (identity["size"], identity["sha256"])
+        if key in seen:
+            duplicates.add(path)
+        else:
+            seen[key] = path
+    return duplicates
 
 
 def _process_single_file(args):
@@ -99,7 +41,8 @@ def _process_single_file(args):
     Returns:
         dict: Result dictionary with status, file info, and statistics
     """
-    file_path, dest_path, operation, duplicate_files, name_duplicate_files = args
+    file_path, dest_path, operation, duplicate_files, name_duplicate_files = args[:5]
+    journal = args[5] if len(args) > 5 else None
     
     result = {
         'status': 'skipped',
@@ -112,13 +55,6 @@ def _process_single_file(args):
     }
     
     try:
-        # Skip name-based duplicates
-        if name_duplicate_files and file_path in name_duplicate_files:
-            result['status'] = 'skipped'
-            result['reason'] = 'name_duplicate'
-            logger.info(f"Skipping name-based duplicate: {file_path.name}")
-            return result
-        
         # Skip perceptual duplicates (use absolute path for comparison)
         if duplicate_files and file_path.resolve() in duplicate_files:
             result['status'] = 'skipped'
@@ -163,21 +99,9 @@ def _process_single_file(args):
         
         target_file = target_folder / file_path.name
         
-        # Check if file already exists
-        if target_file.exists():
-            result['status'] = 'skipped'
-            result['reason'] = 'duplicate_filename'
-            logger.info(f"Skipped duplicate: {file_path.name} already exists in {target_folder}")
-            return result
-        
-        # Move or copy file
-        if operation == 'copy':
-            shutil.copy2(str(file_path), str(target_file))
-            logger.info(f"Copied: {file_path.name} -> {target_folder}")
-        else:
-            shutil.move(str(file_path), str(target_file))
-            logger.info(f"Moved: {file_path.name} -> {target_folder}")
-        
+        target_file = verified_transfer(file_path, target_file, operation, journal=journal)
+        logger.info(f"Verified {operation}: {file_path.name} -> {target_file}")
+
         result['status'] = 'success'
         result['folder_key'] = folder_key
         result['source'] = file_path
@@ -210,14 +134,13 @@ def organise_files(
         operation: 'move' or 'copy'
         check_duplicates: If True, detect and skip duplicate images before organizing (perceptual hashing)
         duplicate_threshold: Hamming distance threshold for duplicate detection
-        check_name_duplicates: If True, detect and skip files with duplicate naming patterns (e.g., photo(1).jpg)
+        check_name_duplicates: Legacy option; named variants are retained for content review
         progress_callback: Optional callback(completed, total, result_dict) invoked per processed file
         target_files: Optional list of specific absolute file paths to organize. If provided, only these files are processed.
     """
-    src_path = Path(src_dir)
-    dest_path = Path(dest_dir)
-    
-    undo_manager.start_session()
+    if operation not in {"copy", "move"}:
+        raise ValueError("operation must be copy or move")
+    src_path, dest_path = validate_roots(src_dir, dest_dir)
 
     # Statistics tracking
     stats = {
@@ -234,19 +157,18 @@ def organise_files(
     }
     
     # Gather files
-    if target_files:
-        all_files = [Path(f) for f in target_files]
+    if target_files is not None:
+        all_files = [Path(f).absolute() for f in target_files]
+        if any(p.is_symlink() or src_path not in p.resolve().parents for p in all_files):
+            raise ValueError("target_files must be regular files inside the source directory")
     else:
         all_files = list(src_path.rglob('*'))
     
-    # Name-based duplicate detection (if enabled)
+    # Filename resemblance never authorizes omitting an input.
     name_duplicate_files = set()
     if check_name_duplicates:
-        logger.info("Scanning for name-based duplicates (e.g., photo(1).jpg)...")
-        name_duplicate_files = detect_name_based_duplicates(all_files)
-        stats['name_duplicates'] = len(name_duplicate_files)
-        logger.info(f"Found {len(name_duplicate_files)} name-based duplicates")
-    
+        logger.info("Filename hints no longer skip inputs; retaining all named variants")
+
     # Perceptual duplicate detection (if enabled)
     duplicate_files = set()  # Files to skip due to perceptual duplication
     if check_duplicates:
@@ -299,13 +221,12 @@ def organise_files(
     # Collect all files to process
     file_list = []
     for file_path in all_files:
-        if file_path.is_file():
+        if file_path.is_file() and not file_path.is_symlink():
             stats['total_scanned'] += 1
             file_list.append(file_path)
     
     if not file_list:
         logger.info("No files found to process")
-        undo_manager.end_session()
         if progress_callback:
             try:
                 progress_callback(0, 0, None)
@@ -313,33 +234,25 @@ def organise_files(
                 pass
         return stats
     
-    # Determine number of workers (leave 1 core free)
-    num_workers = max(1, cpu_count() - 1)
-    logger.info(f"Using {num_workers} worker processes for parallel file organization")
-    print(f"\n🚀 Processing {len(file_list)} files with {num_workers} workers...")
-    
-    # Prepare arguments for worker function
-    worker_args = [
-        (file_path, dest_path, operation, duplicate_files if check_duplicates else None, 
-         name_duplicate_files if check_name_duplicates else None)
-        for file_path in file_list
-    ]
-    
-    # Process files in parallel with progress bar
+    num_workers = min(8, max(1, cpu_count() - 1), len(file_list))
     results = []
     total_files = len(file_list)
-    with Pool(processes=num_workers) as pool:
-        for completed, result in enumerate(tqdm(pool.imap(_process_single_file, worker_args), 
-                          total=total_files, 
-                          desc="Organizing files",
-                          unit="file"), 1):
-            results.append(result)
-            if progress_callback:
-                try:
+    # Threads share one explicitly scoped journal; no forked singleton state.
+    with UndoManager() as journal:
+        worker_args = [
+            (p, dest_path, operation, duplicate_files if check_duplicates else None,
+             name_duplicate_files, journal)
+            for p in file_list
+        ]
+        with ThreadPoolExecutor(max_workers=num_workers) as pool:
+            for completed, result in enumerate(tqdm(
+                pool.map(_process_single_file, worker_args), total=total_files,
+                desc="Organizing files", unit="file",
+            ), 1):
+                results.append(result)
+                if progress_callback:
                     progress_callback(completed, total_files, result)
-                except Exception:
-                    pass
-    
+
     # Aggregate results and update statistics
     for result in results:
         # Track file types
@@ -356,8 +269,6 @@ def organise_files(
             if result['folder_key']:
                 stats['folders_created'][result['folder_key']] += 1
             
-            # Log to undo manager
-            undo_manager.log_action(operation, result['source'], result['destination'])
             
         elif result['status'] == 'skipped':
             if result['reason'] == 'duplicate_filename':
@@ -367,7 +278,6 @@ def organise_files(
         elif result['status'] == 'error':
             stats['errors'] += 1
     
-    undo_manager.end_session()
     return stats
 
 

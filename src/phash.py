@@ -17,7 +17,7 @@ Usage:
 """
 
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
 from src.logger import logger
 from src import constants
@@ -223,6 +223,65 @@ def compute_hashes_batch(
     return result
 
 
+def _python_resolution(path: str) -> int:
+    try:
+        from PIL import Image
+
+        with Image.open(path) as img:
+            return img.size[0] * img.size[1]
+    except Exception:
+        return 0
+
+
+def compute_hashes_with_resolution(paths: List[str]) -> Dict[str, Tuple[str, int]]:
+    """
+    Hash images and read their pixel counts, decoding each file once.
+
+    Pair with ``group_hashes`` to scan in batches (for progress reporting)
+    without hashing any image a second time.
+
+    Returns:
+        Dictionary mapping each decodable path to ``(hash, width * height)``
+    """
+    if _USE_RUST and hasattr(_phash, "compute_hashes_with_resolution"):
+        try:
+            return _phash.compute_hashes_with_resolution(paths)
+        except Exception as e:
+            logger.error(f"Batch hashing failed: {e}")
+
+    return {
+        path: (h, _python_resolution(path))
+        for path, h in compute_hashes_batch(paths).items()
+    }
+
+
+def group_hashes(
+    hashes: Dict[str, Tuple[str, int]],
+    threshold: int = THRESHOLD_SIMILAR
+) -> List[DuplicateGroup]:
+    """
+    Group already-hashed images into duplicate sets without reading any file.
+
+    Args:
+        hashes: Mapping of path to ``(hash, resolution)``
+        threshold: Maximum Hamming distance
+    """
+    if _USE_RUST and hasattr(_phash, "group_hashes"):
+        try:
+            raw_groups = _phash.group_hashes(
+                [(path, h, res) for path, (h, res) in hashes.items()], threshold
+            )
+            return [
+                DuplicateGroup(paths=g["paths"], hash=g["hash"], best=g["best"])
+                for g in raw_groups
+            ]
+        except Exception as e:
+            logger.error(f"Rust duplicate grouping failed: {e}")
+            logger.info("Falling back to Python implementation")
+
+    return _python_group([(path, h, res) for path, (h, res) in hashes.items()], threshold)
+
+
 # ============================================================================
 # Pure Python Fallback Implementation
 # ============================================================================
@@ -235,8 +294,8 @@ def _python_compute_hash(
     try:
         from PIL import Image
         
-        img = Image.open(path).convert('L')  # Grayscale
-        return _python_phash(img, hash_size)
+        with Image.open(path) as source:
+            return _python_phash(source.convert('L'), hash_size)  # Grayscale
     except Exception as e:
         logger.debug(f"Python hash failed for {path}: {e}")
         return None
@@ -324,20 +383,20 @@ def _python_find_duplicates(
     threshold: int
 ) -> List[DuplicateGroup]:
     """Pure Python duplicate finder (fallback)."""
-    from PIL import Image
-    
-    # Compute hashes
     image_data = []
     for path in paths:
         h = _python_compute_hash(path)
         if h:
-            try:
-                with Image.open(path) as img:
-                    res = img.size[0] * img.size[1]
-            except Exception:
-                res = 0
-            image_data.append((path, h, res))
-    
+            image_data.append((path, h, _python_resolution(path)))
+
+    return _python_group(image_data, threshold)
+
+
+def _python_group(
+    image_data: List[Tuple[str, str, int]],
+    threshold: int
+) -> List[DuplicateGroup]:
+    """Group ``(path, hash, resolution)`` records by Hamming distance."""
     if not image_data:
         return []
     

@@ -13,16 +13,16 @@ from typing import Optional, List, Literal, Callable
 from dataclasses import dataclass
 from src import constants
 from src.phash import (
-    compute_hashes_batch,
+    compute_hashes_with_resolution,
     find_duplicates,
-    find_duplicates_from_paths,
+    group_hashes,
     DuplicateGroup,
     is_rust_available,
     get_backend,
     THRESHOLD_SIMILAR
 )
 from src.logger import logger
-from src.undo_manager import undo_manager
+from src.undo_manager import UndoManager
 
 
 @dataclass
@@ -103,17 +103,15 @@ def scan_for_duplicates_with_progress(
     hash_started = time.perf_counter()
     chunk_size = 256
     total_chunks = (total_images + chunk_size - 1) // chunk_size
-    hashes_fetched = 0
-    hashed_paths: List[str] = []
+    # path -> (hash, resolution); each image is decoded exactly once here and
+    # the grouping stage below reuses these results.
+    hashes: dict[str, tuple[str, int]] = {}
 
     for idx in range(total_chunks):
         start = idx * chunk_size
         end = min(start + chunk_size, total_images)
-        chunk = image_paths[start:end]
-        chunk_hashes = compute_hashes_batch(chunk)
-
-        hashes_fetched += len(chunk_hashes)
-        hashed_paths.extend(chunk_hashes.keys())
+        hashes.update(compute_hashes_with_resolution(image_paths[start:end]))
+        hashes_fetched = len(hashes)
 
         percent = 21 + int(((idx + 1) / max(total_chunks, 1)) * 49)
         emit(
@@ -121,9 +119,7 @@ def scan_for_duplicates_with_progress(
             f"Fetching hashes: {hashes_fetched}/{total_images} | Images found: {total_images}",
         )
 
-    # Remove duplicates while preserving order.
-    hashed_paths = list(dict.fromkeys(hashed_paths))
-    hashes_fetched = len(hashed_paths)
+    hashes_fetched = len(hashes)
     hashing_seconds = time.perf_counter() - hash_started
     hash_success_rate_pct = (hashes_fetched / total_images) * 100 if total_images else 0.0
     images_without_hash = max(total_images - hashes_fetched, 0)
@@ -150,7 +146,7 @@ def scan_for_duplicates_with_progress(
         )
         return []
 
-    # Stage 3: run grouping on hashed candidates using existing Rust/Python engine.
+    # Stage 3: group the hashes computed above (no file access).
     done = threading.Event()
     progress_state = {"value": 71}
 
@@ -167,7 +163,7 @@ def scan_for_duplicates_with_progress(
     heartbeat = threading.Thread(target=progress_heartbeat, daemon=True)
     heartbeat.start()
     try:
-        groups = find_duplicates_from_paths(hashed_paths, threshold)
+        groups = group_hashes(hashes, threshold)
     finally:
         done.set()
         heartbeat.join(timeout=1.0)
@@ -250,16 +246,21 @@ def handle_duplicates(
     Returns:
         DuplicateReport with statistics and details
     """
+    with UndoManager() as session:
+        return _handle_duplicates(source_dir, duplicates_dir, action, threshold, keep_best, session)
+
+
+def _handle_duplicates(source_dir, duplicates_dir, action, threshold, keep_best, undo_manager):
     source_path = Path(source_dir)
     
-    undo_manager.start_session()
-
     # Find duplicates
     groups = scan_for_duplicates(source_dir, threshold)
     
-    # Calculate statistics
-    total_scanned = sum(len(list(source_path.rglob(f'*{ext}'))) 
-                       for ext in ['.jpg', '.jpeg', '.png', '.heic', '.bmp', '.tiff', '.gif'])
+    # Calculate statistics (one walk; same extension rule as the scanner)
+    total_scanned = sum(
+        1 for p in source_path.rglob('*')
+        if p.suffix.lower() in constants.IMAGE_EXTENSIONS and p.is_file()
+    )
     total_duplicates = sum(len(g.paths) - 1 for g in groups)  # -1 for keeping best
     
     # Calculate recoverable space
@@ -327,7 +328,6 @@ def handle_duplicates(
                     logger.error(f"Error deleting {dup}: {e}")
                     report.errors += 1
     
-    undo_manager.end_session()
     return report
 
 

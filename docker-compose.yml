@@ -2,9 +2,11 @@ services:
   clean-backup:
     build:
       context: .
-    image: ghcr.io/charan/clean-backup:latest
+    image: ghcr.io/jayacharanr/clean-backup:latest
     ports:
-      - "${CLEAN_BACKUP_PORT:-8080}:8080"
+      # The web UI has no login. It is published on this machine only unless
+      # CLEAN_BACKUP_BIND is set (for example 0.0.0.0 on a trusted home network).
+      - "${CLEAN_BACKUP_BIND:-127.0.0.1}:${CLEAN_BACKUP_PORT:-8080}:8080"
     volumes:
       - ${MEDIA_PATH:-./photos}:/data/media
       - clean-backup-db:/app/data/db
@@ -15,6 +17,7 @@ services:
       - CLEAN_BACKUP_DB_PATH=/app/data/db/clean_backup.sqlite
       - CLEAN_BACKUP_CONFIG_DIR=/app/data/config
       - CLEAN_BACKUP_LOG_LEVEL=${CLEAN_BACKUP_LOG_LEVEL:-info}
+      - CLEAN_BACKUP_ALLOWED_HOSTS=${CLEAN_BACKUP_ALLOWED_HOSTS:-}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]

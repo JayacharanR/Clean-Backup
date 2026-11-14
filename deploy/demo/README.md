@@ -27,6 +27,11 @@ This directory contains everything needed to deploy a read-only demo of Clean-Ba
 | `CLEAN_BACKUP_PORT` | `8080` |
 | `CLEAN_BACKUP_LOG_LEVEL` | `info` |
 
+The server only answers requests addressed to a hostname it expects. Render's
+own `*.onrender.com` name is picked up automatically (`RENDER_EXTERNAL_HOSTNAME`);
+for a custom domain also set `CLEAN_BACKUP_ALLOWED_HOSTS=demo.example.com`.
+In demo mode the API can only read the seeded media folder.
+
 ### 3. Deploy
 
 Render will build using the repo-root `Dockerfile` automatically. The `render.yaml` blueprint in this directory can also be used for one-click deploy.

@@ -16,7 +16,7 @@ sudo apt install -y nodejs npm
 ### 2) Build frontend
 
 ```bash
-cd /home/charan/Project/Clean_Backup/web
+cd web
 npm install
 npm run build
 ```
@@ -24,7 +24,7 @@ npm run build
 ### 3) Install Python dependencies (if needed)
 
 ```bash
-cd /home/charan/Project/Clean_Backup
+# from the repository root
 uv pip install -r requirements.txt
 ```
 
@@ -39,7 +39,7 @@ Then select option 6 from the CLI menu to run the website on localhost.
 ## Local frontend development (optional)
 
 ```bash
-cd /home/charan/Project/Clean_Backup/web
+cd web
 npm install
 npm run dev
 ```
@@ -47,8 +47,8 @@ npm run dev
 In a separate terminal, run backend API:
 
 ```bash
-cd /home/charan/Project/Clean_Backup
-python -m src.web_app
+# from the repository root
+CLEAN_BACKUP_PORT=5179 python main.py --web
 ```
 
 Vite proxies `/api/*` to `http://127.0.0.1:5179`.

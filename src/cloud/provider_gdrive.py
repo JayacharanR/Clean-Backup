@@ -40,6 +40,15 @@ def _mime(path: Path) -> str:
     return _MIME_TYPES.get(path.suffix.lower(), "application/octet-stream")
 
 
+def _q(value: str) -> str:
+    """Quote a value for a Drive ``files.list`` query string literal.
+
+    File and folder names come from the local filesystem; an unescaped
+    apostrophe would break the query or change which files it matches.
+    """
+    return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
 def _sha256(path: str) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -114,7 +123,7 @@ class GoogleDriveProvider(CloudProvider):
 
         # Search for existing
         query = (
-            f"name='{name}' and '{parent_id}' in parents and "
+            f"name={_q(name)} and {_q(parent_id)} in parents and "
             f"mimeType='application/vnd.google-apps.folder' and trashed=false"
         )
         results = self._service.files().list(
@@ -154,7 +163,7 @@ class GoogleDriveProvider(CloudProvider):
 
         while True:
             resp = self._service.files().list(
-                q=f"'{folder_id}' in parents and trashed=false",
+                q=f"{_q(folder_id)} in parents and trashed=false",
                 spaces="drive",
                 fields="nextPageToken, files(id, name, size, modifiedTime, properties)",
                 pageSize=100,
@@ -258,7 +267,7 @@ class GoogleDriveProvider(CloudProvider):
 
         try:
             folder_id = self._resolve_folder_id(folder_path) if folder_path else "root"
-            query = f"name='{name}' and '{folder_id}' in parents and trashed=false"
+            query = f"name={_q(name)} and {_q(folder_id)} in parents and trashed=false"
             resp = self._service.files().list(
                 q=query, spaces="drive", fields="files(id)", pageSize=1,
             ).execute()
@@ -279,7 +288,7 @@ class GoogleDriveProvider(CloudProvider):
 
         try:
             folder_id = self._resolve_folder_id(folder_path) if folder_path else "root"
-            query = f"name='{name}' and '{folder_id}' in parents and trashed=false"
+            query = f"name={_q(name)} and {_q(folder_id)} in parents and trashed=false"
             resp = self._service.files().list(
                 q=query, spaces="drive", fields="files(id, properties)", pageSize=1,
             ).execute()
@@ -294,12 +303,12 @@ class GoogleDriveProvider(CloudProvider):
 
 # ── OAuth helpers (used by Flask endpoints) ───────────────────────────────
 
-def start_oauth_flow(redirect_uri: str) -> tuple[str, Any]:
+def start_oauth_flow(redirect_uri: str) -> tuple[str, str, Any]:
     """
     Begin the OAuth flow.
 
-    Returns ``(auth_url, flow)`` — the caller must persist *flow* in
-    the session/state so the callback can finish it.
+    Returns ``(auth_url, state, flow)`` — the caller must keep *flow* under
+    *state*, the single anti-forgery value Google echoes to the callback.
     """
     from google_auth_oauthlib.flow import Flow
 
@@ -315,12 +324,12 @@ def start_oauth_flow(redirect_uri: str) -> tuple[str, Any]:
         scopes=SCOPES,
         redirect_uri=redirect_uri,
     )
-    auth_url, _ = flow.authorization_url(
+    auth_url, state = flow.authorization_url(
         access_type="offline",
         include_granted_scopes="true",
         prompt="consent",
     )
-    return auth_url, flow
+    return auth_url, state, flow
 
 
 def finish_oauth_flow(flow: Any, auth_response_url: str) -> dict:

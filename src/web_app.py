@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import ipaddress
 import os
 import subprocess
 import sys
@@ -11,17 +12,21 @@ import webbrowser
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlsplit
 
 from flask import Flask, jsonify, request, send_file, send_from_directory
+from markupsafe import escape
 from PIL import Image
 
 from src.compressor import compress_files, get_compression_settings
 from src.config import get_threshold, load_config, save_config
+from src.constants import IMAGE_EXTENSIONS
 from src.duplicate_handler import scan_for_duplicates_with_progress
 from src.logger import logger
 from src.organiser import organise_files
 from src.phash import get_backend
-from src.undo_manager import undo_manager
+from src.file_operations import verified_transfer
+from src.undo_manager import UndoManager, undo_manager
 from src.demo import demo_guard, is_demo_mode
 
 # Classification module
@@ -83,15 +88,29 @@ class JobRecord:
 
 
 class JobManager:
+    # Finished jobs keep their full result payload, so retain only recent ones.
+    MAX_FINISHED_JOBS = 50
+
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._jobs: dict[str, JobRecord] = {}
+
+    def _prune_finished(self) -> None:
+        finished = [
+            job for job in self._jobs.values() if job.status in {"completed", "failed"}
+        ]
+        excess = len(finished) - self.MAX_FINISHED_JOBS
+        if excess > 0:
+            finished.sort(key=lambda job: job.updated_at)
+            for job in finished[:excess]:
+                del self._jobs[job.id]
 
     def submit(self, kind: str, task_fn: Callable[..., dict[str, Any]], *args: Any, **kwargs: Any) -> str:
         job_id = uuid.uuid4().hex
         now = time.time()
 
         with self._lock:
+            self._prune_finished()
             self._jobs[job_id] = JobRecord(
                 id=job_id,
                 kind=kind,
@@ -166,6 +185,27 @@ def _add_allowed_root(root: Path) -> None:
         _allowed_roots.add(root)
 
 
+def _demo_media_root() -> Path:
+    return Path(os.environ.get("CLEAN_BACKUP_MEDIA_PATH", "/data/media")).resolve()
+
+
+def _resolve_source_dir(raw_path: str) -> Path:
+    """Resolve a directory a job may read, and remember it as an allowed root.
+
+    The public demo has no per-user isolation, so there it may only read the
+    seeded media directory rather than any directory on the host.
+    """
+    source = Path(raw_path).expanduser().resolve()
+    if is_demo_mode():
+        root = _demo_media_root()
+        if source != root and root not in source.parents:
+            raise PermissionError("The demo can only read its sample media folder")
+    if not source.is_dir():
+        raise ValueError(f"Source directory not found: {source}")
+    _add_allowed_root(source)
+    return source
+
+
 def _is_allowed(path: Path) -> bool:
     path = path.resolve()
     with _allowed_roots_lock:
@@ -235,11 +275,7 @@ def _image_payload(path: Path, is_best: bool) -> dict[str, Any]:
 
 
 def _scan_duplicates_task(progress: Callable[[int, str], None], source_dir: str, threshold: int) -> dict[str, Any]:
-    source = Path(source_dir).expanduser().resolve()
-    if not source.exists() or not source.is_dir():
-        raise ValueError(f"Source directory not found: {source}")
-
-    _add_allowed_root(source)
+    source = _resolve_source_dir(source_dir)
 
     scan_started = time.perf_counter()
     scan_stats: dict[str, float | int] = {}
@@ -330,13 +366,8 @@ def _organize_task(
     duplicate_threshold: int,
     check_name_duplicates: bool,
 ) -> dict[str, Any]:
-    source = Path(source_dir).expanduser().resolve()
+    source = _resolve_source_dir(source_dir)
     destination = Path(destination_dir).expanduser().resolve()
-
-    if not source.exists() or not source.is_dir():
-        raise ValueError(f"Source directory not found: {source}")
-
-    _add_allowed_root(source)
     _add_allowed_root(destination)
 
     progress(10, "Running organize workflow")
@@ -388,13 +419,8 @@ def _compress_task(
     level: int,
     file_types: str,
 ) -> dict[str, Any]:
-    source = Path(source_dir).expanduser().resolve()
+    source = _resolve_source_dir(source_dir)
     output = Path(output_dir).expanduser().resolve()
-
-    if not source.exists() or not source.is_dir():
-        raise ValueError(f"Source directory not found: {source}")
-
-    _add_allowed_root(source)
     _add_allowed_root(output)
 
     progress(10, "Running compression workflow")
@@ -433,7 +459,8 @@ def _compress_task(
 def _trash_target_for(path: Path) -> Path:
     timestamp = int(time.time())
     relative = path.as_posix().replace("/", "__")
-    return TRASH_ROOT / f"{timestamp}_{relative}"
+    # Long paths would exceed the 255-byte filename limit once flattened.
+    return TRASH_ROOT / f"{timestamp}_{relative[-180:]}"
 
 
 def _run_picker_command(
@@ -579,11 +606,63 @@ def _pick_folder_native(initial_dir: str | None = None) -> Path | None:
     return _pick_folder_tkinter(start_dir)
 
 
+_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+
+def _allowed_hosts() -> set[str]:
+    """Extra hostnames this server may be addressed by, besides loopback and IPs."""
+    names = os.environ.get("CLEAN_BACKUP_ALLOWED_HOSTS", "").split(",")
+    # Render sets this for its public URL; the hosted demo needs no extra setup.
+    names.append(os.environ.get("RENDER_EXTERNAL_HOSTNAME", ""))
+    return {name.strip().lower() for name in names if name.strip()}
+
+
+def _host_is_trusted(hostname: str | None) -> bool:
+    if not hostname:
+        return False
+    hostname = hostname.lower()
+    if hostname in _LOOPBACK_HOSTS or hostname.endswith(".localhost"):
+        return True
+    allowed = _allowed_hosts()
+    if "*" in allowed or hostname in allowed:
+        return True
+    try:
+        # An IP literal cannot be re-pointed by an attacker's DNS record.
+        ipaddress.ip_address(hostname)
+        return True
+    except ValueError:
+        return False
+
+
+@app.before_request
+def _reject_untrusted_requests():
+    """The API has no login, so only the app's own pages may drive it.
+
+    * An unexpected Host header means the browser reached us through someone
+      else's DNS name (DNS rebinding); refuse it.
+    * A state-changing request whose Origin is another site is cross-site
+      request forgery; refuse it. Non-browser clients send no Origin.
+    """
+    if not _host_is_trusted(urlsplit(f"//{request.host}").hostname):
+        return jsonify({"ok": False, "error": "Host not allowed. Set CLEAN_BACKUP_ALLOWED_HOSTS."}), 403
+
+    if request.method in {"GET", "HEAD", "OPTIONS"}:
+        return None
+
+    origin = request.headers.get("Origin")
+    if origin is not None and urlsplit(origin).netloc.lower() != request.host.lower():
+        return jsonify({"ok": False, "error": "Cross-origin request refused"}), 403
+    if origin is None and request.headers.get("Sec-Fetch-Site") == "cross-site":
+        return jsonify({"ok": False, "error": "Cross-origin request refused"}), 403
+    return None
+
+
 @app.after_request
 def _after_request(response):
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type"
-    response.headers["Access-Control-Allow-Methods"] = "GET,POST,PATCH,DELETE,OPTIONS"
+    # No Access-Control-Allow-Origin: the UI is served from this same origin
+    # (or through the Vite dev proxy), so other sites get no read access.
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
     return response
 
 
@@ -802,10 +881,14 @@ def api_delete_selected():
     deleted_paths: list[str] = []
     errors: list[str] = []
 
-    undo_manager.start_session()
+    session_manager = UndoManager()
+    session_manager.start_session()
 
     try:
         for item in selected_images:
+            if not isinstance(item, dict):
+                errors.append("Invalid selection entry")
+                continue
             raw_path = str(item.get("path", "")).strip()
             is_best = bool(item.get("is_best", False))
 
@@ -822,12 +905,21 @@ def api_delete_selected():
                 if not file_path.is_file():
                     errors.append(f"Not a file: {file_path}")
                     continue
+                # Duplicate review only ever lists images; refuse anything else
+                # that happens to sit under a scanned folder.
+                if file_path.suffix.lower() not in IMAGE_EXTENSIONS:
+                    errors.append(f"Not an image: {file_path}")
+                    continue
 
                 if mode == "trash":
-                    target = _trash_target_for(file_path)
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    file_path.rename(target)
-                    undo_manager.log_action("move", str(file_path), str(target))
+                    # Verified, journaled move: works across filesystems, never
+                    # replaces an earlier trashed file, and is undoable.
+                    verified_transfer(
+                        file_path,
+                        _trash_target_for(file_path),
+                        "move",
+                        journal=session_manager,
+                    )
                 else:
                     file_path.unlink()
 
@@ -835,9 +927,9 @@ def api_delete_selected():
             except Exception as exc:
                 errors.append(str(exc))
 
-        undo_manager.end_session()
+        session_manager.end_session()
     except Exception:
-        undo_manager.end_session()
+        session_manager.end_session()
         raise
 
     return jsonify(
@@ -902,6 +994,10 @@ def api_image():
     if not image_path.is_file():
         return jsonify({"ok": False, "error": "Not a file"}), 400
 
+    # Previews are for media only; never hand back arbitrary files from a root.
+    if image_path.suffix.lower() not in IMAGE_EXTENSIONS:
+        return jsonify({"ok": False, "error": "Not a supported image type"}), 415
+
     try:
         with Image.open(image_path) as img:
             out = img.copy()
@@ -922,8 +1018,14 @@ def api_image():
 
             return send_file(buffer, mimetype="image/jpeg")
     except Exception:
-        # Fallback for files Pillow cannot decode through current codecs.
-        return send_file(image_path)
+        # Fallback for image formats Pillow cannot decode (e.g. camera RAW).
+        # Sent as a download so mislabelled content is never rendered inline.
+        return send_file(
+            image_path,
+            mimetype="application/octet-stream",
+            as_attachment=True,
+            download_name=image_path.name,
+        )
 
 
 
@@ -935,10 +1037,7 @@ def _classify_task(
     source_dir: str,
     run_id: str,
 ) -> dict[str, Any]:
-    source = Path(source_dir).expanduser().resolve()
-    if not source.exists() or not source.is_dir():
-        raise ValueError(f"Source directory not found: {source}")
-    _add_allowed_root(source)
+    source = _resolve_source_dir(source_dir)
 
     config = get_run_config(run_id) or {}
     result = run_classify_pipeline(str(source), run_id, config, progress)
@@ -976,11 +1075,9 @@ def api_classify_start():
 
 def _classify_apply_task(progress_cb, run_id, dest_dir, operation):
     from src.classify.apply_org import apply_classification
-    try:
-        return apply_classification(run_id, dest_dir, operation, progress_cb)
-    except Exception as e:
-        logger.error(f"Classification apply failed: {e}")
-        return {"error": str(e)}
+
+    # Errors propagate so the job is reported as failed, not completed.
+    return apply_classification(run_id, dest_dir, operation, progress_cb)
 
 
 @app.route("/api/classify/apply", methods=["POST", "OPTIONS"])
@@ -1188,8 +1285,8 @@ def api_purge_faces():
 @app.route("/api/face-crop", methods=["GET"])
 def api_face_crop():
     face_id = request.args.get("id", "")
-    if not face_id:
-        return jsonify({"ok": False, "error": "id is required"}), 400
+    if not face_id.isdecimal():
+        return jsonify({"ok": False, "error": "id must be a face number"}), 400
 
     crop_path = FACE_CACHE_DIR / f"face_{face_id}.jpg"
     if crop_path.exists():
@@ -1229,6 +1326,7 @@ def api_resolve_review(review_id: int):
 
 # In-memory OAuth flow cache (keyed by a random state token)
 _oauth_flows: dict[str, Any] = {}
+_MAX_PENDING_OAUTH_FLOWS = 16
 
 
 @app.route("/api/cloud/accounts", methods=["GET"])
@@ -1247,12 +1345,13 @@ def api_gdrive_connect():
         # Build the redirect URI pointing back to our callback endpoint
         host_url = request.host_url.rstrip("/")
         redirect_uri = f"{host_url}/api/cloud/accounts/gdrive/callback"
-        auth_url, flow = start_oauth_flow(redirect_uri)
+        auth_url, state, flow = start_oauth_flow(redirect_uri)
 
-        # Store flow in memory keyed by a state token
-        state = uuid.uuid4().hex
+        # Keep the pending flow in memory under the state Google will echo back.
+        while len(_oauth_flows) >= _MAX_PENDING_OAUTH_FLOWS:
+            _oauth_flows.pop(next(iter(_oauth_flows)))
         _oauth_flows[state] = flow
-        return jsonify({"ok": True, "auth_url": f"{auth_url}&state={state}", "state": state})
+        return jsonify({"ok": True, "auth_url": auth_url, "state": state})
     except FileNotFoundError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
     except Exception as exc:
@@ -1295,7 +1394,7 @@ def api_gdrive_callback():
         )
     except Exception as exc:
         logger.error("OAuth callback failed: %s", exc)
-        return f"<html><body><h2>❌ Connection failed</h2><p>{exc}</p></body></html>", 500
+        return f"<html><body><h2>❌ Connection failed</h2><p>{escape(str(exc))}</p></body></html>", 500
 
 
 @app.route("/api/cloud/accounts/<int:account_id>", methods=["DELETE", "OPTIONS"])
@@ -1337,22 +1436,24 @@ def api_cloud_sync_config():
 
     from src.cloud.manifest import create_sync_run
 
+    blocked = demo_guard()
+    if blocked:
+        return blocked
+
     payload = request.get_json(silent=True) or {}
-    account_id = payload.get("account_id")
-    if not account_id:
+    try:
+        account_id = int(payload.get("account_id"))
+    except (TypeError, ValueError):
         return jsonify({"ok": False, "error": "account_id is required"}), 400
 
-    run_id = create_sync_run(int(account_id), payload)
+    run_id = create_sync_run(account_id, payload)
     return jsonify({"ok": True, "run_id": run_id})
 
 
 def _cloud_sync_task(progress_cb, run_id):
     from src.cloud.sync_pipeline import run_sync
-    try:
-        return run_sync(run_id, progress_cb)
-    except Exception as e:
-        logger.error(f"Cloud sync failed: {e}")
-        return {"error": str(e)}
+
+    return run_sync(run_id, progress_cb)
 
 
 @app.route("/api/cloud/sync/start", methods=["POST", "OPTIONS"])
@@ -1365,21 +1466,19 @@ def api_cloud_sync_start():
         return blocked
 
     payload = request.get_json(silent=True) or {}
-    run_id = payload.get("run_id")
-    if not run_id:
+    try:
+        run_id = int(payload.get("run_id"))
+    except (TypeError, ValueError):
         return jsonify({"ok": False, "error": "run_id is required"}), 400
 
-    job_id = jobs.submit("cloud_sync", _cloud_sync_task, int(run_id))
+    job_id = jobs.submit("cloud_sync", _cloud_sync_task, run_id)
     return jsonify({"ok": True, "job_id": job_id, "run_id": run_id})
 
 
 def _cloud_undo_task(progress_cb, run_id):
     from src.cloud.sync_pipeline import undo_sync
-    try:
-        return undo_sync(run_id, progress_cb)
-    except Exception as e:
-        logger.error(f"Cloud sync undo failed: {e}")
-        return {"error": str(e)}
+
+    return undo_sync(run_id, progress_cb)
 
 
 @app.route("/api/cloud/sync/<int:run_id>/undo", methods=["POST", "OPTIONS"])
@@ -1438,11 +1537,14 @@ def serve_frontend(path: str):
     )
 
 
-def start_web_gui(host: str = "0.0.0.0", port: int = None, auto_open: bool = True) -> None:
+def start_web_gui(host: str | None = None, port: int | None = None, auto_open: bool = True) -> None:
     if port is None:
         port = int(os.environ.get("CLEAN_BACKUP_PORT", 8080))
-    # Note: host defaults to 0.0.0.0 to allow Docker binding
-    
+    # The API has no login: listen on loopback unless explicitly told otherwise
+    # (the Docker image sets CLEAN_BACKUP_HOST=0.0.0.0 inside its own network).
+    if host is None:
+        host = os.environ.get("CLEAN_BACKUP_HOST", "127.0.0.1")
+
     # We display 127.0.0.1 in the terminal for clicking convenience
     display_host = "127.0.0.1" if host == "0.0.0.0" else host
     url = f"http://{display_host}:{port}"

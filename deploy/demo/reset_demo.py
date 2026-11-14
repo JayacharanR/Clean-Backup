@@ -46,11 +46,13 @@ def reset_demo():
             import sqlite3
             conn = sqlite3.connect(str(db_path))
             # Delete all user-created data, keep schema
+            # Children before parents: the schema declares foreign keys.
             for table in [
                 "watcher_events", "watcher_configs",
-                "classifications", "classification_runs",
-                "faces", "people", "review_queue",
-                "cloud_sync_runs", "cloud_sync_files", "cloud_accounts",
+                "media_tags", "review_queue", "face_embeddings", "people",
+                "classify_run_config",
+                "sync_manifest", "sync_runs", "cloud_accounts",
+                "media_files",
             ]:
                 try:
                     conn.execute(f"DELETE FROM {table}")

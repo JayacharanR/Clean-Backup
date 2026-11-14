@@ -17,7 +17,10 @@ use pyo3::conversion::ToPyObject;
 use pyo3::prelude::*;
 use std::collections::HashMap;
 
-pub use duplicate::{find_duplicates, find_duplicates_parallel, DuplicateGroup};
+pub use duplicate::{
+    find_duplicates, find_duplicates_parallel, group_duplicates, hash_images_parallel,
+    DuplicateGroup, ImageInfo,
+};
 pub use hash::{HashAlgorithm, ImageHash};
 
 /// Compute the perceptual hash (pHash) of an image file.
@@ -89,26 +92,86 @@ fn are_similar(path1: &str, path2: &str, threshold: u32) -> PyResult<bool> {
 #[pyfunction]
 #[pyo3(signature = (paths, threshold = 10))]
 fn find_duplicate_images(
+    py: Python<'_>,
     paths: Vec<String>,
     threshold: u32,
 ) -> PyResult<Vec<HashMap<String, PyObject>>> {
-    let groups = find_duplicates_parallel(&paths, HashAlgorithm::PHash, threshold)
-        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+    // Decoding and hashing touch no Python objects: let other threads run.
+    let groups =
+        py.allow_threads(|| find_duplicates_parallel(&paths, HashAlgorithm::PHash, threshold));
+    groups_to_python(py, groups)
+}
 
-    Python::with_gil(|py| {
-        let result: Vec<HashMap<String, PyObject>> = groups
+fn groups_to_python(
+    py: Python<'_>,
+    groups: Result<Vec<DuplicateGroup>, String>,
+) -> PyResult<Vec<HashMap<String, PyObject>>> {
+    let groups = groups.map_err(pyo3::exceptions::PyRuntimeError::new_err)?;
+
+    Ok(groups
+        .into_iter()
+        .filter(|g| g.paths.len() > 1) // Only return actual duplicates
+        .map(|g| {
+            let mut map = HashMap::new();
+            map.insert("paths".to_string(), g.paths.to_object(py));
+            map.insert("hash".to_string(), g.hash.to_object(py));
+            map.insert("best".to_string(), g.best_path.to_object(py));
+            map
+        })
+        .collect())
+}
+
+/// Compute pHash and pixel count (width * height) for many images in parallel.
+///
+/// Each file is decoded once. Use with `group_hashes` to report progress
+/// between hashing batches without hashing anything twice.
+///
+/// Returns:
+///     Dictionary mapping file paths to `(hash, resolution)`.
+///     Failed images are excluded from the result.
+#[pyfunction]
+#[pyo3(signature = (paths))]
+fn compute_hashes_with_resolution(
+    py: Python<'_>,
+    paths: Vec<String>,
+) -> HashMap<String, (String, u64)> {
+    py.allow_threads(|| {
+        hash_images_parallel(&paths, HashAlgorithm::PHash)
             .into_iter()
-            .filter(|g| g.paths.len() > 1) // Only return actual duplicates
-            .map(|g| {
-                let mut map = HashMap::new();
-                map.insert("paths".to_string(), g.paths.clone().to_object(py));
-                map.insert("hash".to_string(), g.hash.to_object(py));
-                map.insert("best".to_string(), g.best_path.to_object(py));
-                map
-            })
-            .collect();
-        Ok(result)
+            .map(|info| (info.path, (info.hash.to_hex(), info.resolution)))
+            .collect()
     })
+}
+
+/// Group already-hashed images into duplicate sets without reading any file.
+///
+/// Args:
+///     items: List of `(path, hash, resolution)` tuples
+///     threshold: Maximum Hamming distance for duplicates (default: 10)
+///
+/// Returns:
+///     Same structure as `find_duplicate_images`.
+#[pyfunction]
+#[pyo3(signature = (items, threshold = 10))]
+fn group_hashes(
+    py: Python<'_>,
+    items: Vec<(String, String, u64)>,
+    threshold: u32,
+) -> PyResult<Vec<HashMap<String, PyObject>>> {
+    let images = items
+        .into_iter()
+        .map(|(path, hex, resolution)| {
+            ImageHash::from_hex(&hex).map(|hash| ImageInfo {
+                path,
+                hash,
+                resolution,
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+
+    let groups = py.allow_threads(|| group_duplicates(images, threshold));
+    groups_to_python(py, groups)
 }
 
 /// Compute pHashes for multiple images in parallel.
@@ -121,19 +184,19 @@ fn find_duplicate_images(
 ///     Failed images are excluded from the result.
 #[pyfunction]
 #[pyo3(signature = (paths))]
-fn compute_hashes_parallel(paths: Vec<String>) -> PyResult<HashMap<String, String>> {
+fn compute_hashes_parallel(py: Python<'_>, paths: Vec<String>) -> HashMap<String, String> {
     use rayon::prelude::*;
 
-    let results: HashMap<String, String> = paths
-        .par_iter()
-        .filter_map(|path| {
-            ImageHash::from_path(path, HashAlgorithm::PHash, 8)
-                .ok()
-                .map(|h| (path.clone(), h.to_hex()))
-        })
-        .collect();
-
-    Ok(results)
+    py.allow_threads(|| {
+        paths
+            .par_iter()
+            .filter_map(|path| {
+                ImageHash::from_path(path, HashAlgorithm::PHash, 8)
+                    .ok()
+                    .map(|h| (path.clone(), h.to_hex()))
+            })
+            .collect()
+    })
 }
 
 /// Python module definition
@@ -144,6 +207,8 @@ fn phash_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(are_similar, m)?)?;
     m.add_function(wrap_pyfunction!(find_duplicate_images, m)?)?;
     m.add_function(wrap_pyfunction!(compute_hashes_parallel, m)?)?;
+    m.add_function(wrap_pyfunction!(compute_hashes_with_resolution, m)?)?;
+    m.add_function(wrap_pyfunction!(group_hashes, m)?)?;
 
     // Add constants for recommended thresholds
     m.add("THRESHOLD_IDENTICAL", 0)?;

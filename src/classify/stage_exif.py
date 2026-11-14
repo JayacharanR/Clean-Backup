@@ -86,8 +86,13 @@ def extract_exif(file_path: str | Path) -> ExifData:
 
             result.has_exif = True
 
-            # Basic tags
-            for tag_id, value in exif.items():
+            # Basic tags. Exposure, ISO, capture time and user comments live in
+            # the Exif sub-IFD of camera files, not the top-level IFD.
+            try:
+                exif_ifd = exif.get_ifd(IFD.Exif)
+            except Exception:
+                exif_ifd = {}
+            for tag_id, value in [*exif.items(), *exif_ifd.items()]:
                 tag_name = TAGS.get(tag_id, str(tag_id))
 
                 if tag_name == "Make":
@@ -104,11 +109,8 @@ def extract_exif(file_path: str | Path) -> ExifData:
                         pass
                 elif tag_name == "ExposureTime":
                     try:
-                        if hasattr(value, "numerator"):
-                            result.exposure_time = float(value)
-                        else:
-                            result.exposure_time = float(value)
-                    except (TypeError, ValueError):
+                        result.exposure_time = float(value)
+                    except (TypeError, ValueError, ZeroDivisionError):
                         pass
                 elif tag_name == "Software":
                     result.software = _safe_str(value)

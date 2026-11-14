@@ -118,7 +118,6 @@ export default function App() {
   const [orgDestination, setOrgDestination] = useState("");
   const [orgOperation, setOrgOperation] = useState("move");
   const [orgCheckDuplicates, setOrgCheckDuplicates] = useState(false);
-  const [orgCheckNameDuplicates, setOrgCheckNameDuplicates] = useState(false);
   const [orgThreshold, setOrgThreshold] = useState(5);
   const [orgJobId, setOrgJobId] = useState(null);
   const [orgJob, setOrgJob] = useState(null);
@@ -555,7 +554,7 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           source_dir: sourceDir.trim(),
-          threshold: Number(threshold) || 5
+          threshold: threshold === "" ? 5 : Number(threshold)
         })
       });
       const data = await res.json();
@@ -682,8 +681,7 @@ export default function App() {
           destination_dir: orgDestination.trim(),
           operation: orgOperation,
           check_duplicates: orgCheckDuplicates,
-          duplicate_threshold: Number(orgThreshold) || 5,
-          check_name_duplicates: orgCheckNameDuplicates
+          duplicate_threshold: orgThreshold === "" ? 5 : Number(orgThreshold)
         })
       });
       const data = await res.json();
@@ -1273,10 +1271,7 @@ export default function App() {
               <input type="checkbox" checked={orgCheckDuplicates} onChange={(e) => setOrgCheckDuplicates(e.target.checked)} />
               Check perceptual duplicates
             </label>
-            <label className="checkbox-row">
-              <input type="checkbox" checked={orgCheckNameDuplicates} onChange={(e) => setOrgCheckNameDuplicates(e.target.checked)} />
-              Check name-based duplicates
-            </label>
+            <p className="muted">Files with similar names are retained. Naming conflicts receive a unique suffix.</p>
             <button className="primary" type="submit" disabled={Boolean(orgJobId)}>Start Organize Job</button>
           </form>
 
@@ -1291,7 +1286,6 @@ export default function App() {
                 <div><span>Images</span><strong>{orgResult.stats.images}</strong></div>
                 <div><span>Videos</span><strong>{orgResult.stats.videos}</strong></div>
                 <div><span>Perceptual duplicates</span><strong>{orgResult.stats.perceptual_duplicates}</strong></div>
-                <div><span>Name duplicates</span><strong>{orgResult.stats.name_duplicates}</strong></div>
               </div>
             </div>
           ) : null}

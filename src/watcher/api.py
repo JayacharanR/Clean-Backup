@@ -63,8 +63,13 @@ def update_watcher(config_id: int):
     if blocked:
         return blocked
 
-    payload = request.get_json(silent=True) or {}
-    success = db.update_config(config_id, **payload)
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"ok": False, "error": "A JSON object is required"}), 400
+    try:
+        success = db.update_config(config_id, **payload)
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
     if not success:
         return jsonify({"ok": False, "error": "Watcher not found"}), 404
 
