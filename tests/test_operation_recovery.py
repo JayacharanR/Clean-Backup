@@ -152,7 +152,7 @@ def test_pending_intent_recovers_after_completion_write_failure(
         monkeypatch.setattr(manager, "complete_action", failed_commit)
         with pytest.raises(OSError):
             operations.verified_transfer(source, target, operation, journal=manager)
-    assert json.loads(path.read_text())[0]["state"] == "prepared"
+    assert journals.load_journal(path)[0]["state"] == "prepared"
     assert target.read_text() == "original"
     assert manager.undo_session(path)
     assert source.read_text() == "original"
@@ -212,7 +212,7 @@ def test_concurrent_session_ids_and_records_are_independent(state):
         paths = list(pool.map(run, range(8)))
     assert len(set(paths)) == 8
     for path in paths:
-        records = json.loads(path.read_text())
+        records = journals.load_journal(path)
         assert len(records) == 1 and records[0]["state"] == "completed"
 
 

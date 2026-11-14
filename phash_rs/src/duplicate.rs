@@ -3,7 +3,6 @@
 //! Provides functionality to find duplicate images based on perceptual hashes.
 
 use crate::hash::{HashAlgorithm, ImageHash};
-use image::GenericImageView;
 use rayon::prelude::*;
 use std::collections::HashMap;
 
@@ -18,12 +17,31 @@ pub struct DuplicateGroup {
     pub best_path: String,
 }
 
-/// Image info for duplicate detection
+/// A hashed image: everything grouping needs, with no further file access.
 #[derive(Debug, Clone)]
-struct ImageInfo {
-    path: String,
-    hash: ImageHash,
-    resolution: u64, // width * height
+pub struct ImageInfo {
+    pub path: String,
+    pub hash: ImageHash,
+    /// width * height
+    pub resolution: u64,
+}
+
+fn hash_one(path: &str, algorithm: HashAlgorithm) -> Result<ImageInfo, String> {
+    let (hash, resolution) = ImageHash::from_path_with_resolution(path, algorithm, 8)?;
+    Ok(ImageInfo {
+        path: path.to_string(),
+        hash,
+        resolution,
+    })
+}
+
+/// Hash images in parallel, decoding each file exactly once.
+/// Files that cannot be decoded are omitted.
+pub fn hash_images_parallel(paths: &[String], algorithm: HashAlgorithm) -> Vec<ImageInfo> {
+    paths
+        .par_iter()
+        .filter_map(|path| hash_one(path, algorithm).ok())
+        .collect()
 }
 
 /// Find duplicate images from a list of paths
@@ -32,22 +50,12 @@ pub fn find_duplicates(
     algorithm: HashAlgorithm,
     threshold: u32,
 ) -> Result<Vec<DuplicateGroup>, String> {
-    // Compute hashes for all images
     let mut images: Vec<ImageInfo> = Vec::new();
 
     for path in paths {
-        match ImageHash::from_path(path, algorithm, 8) {
-            Ok(hash) => {
-                let resolution = get_image_resolution(path).unwrap_or(0);
-                images.push(ImageInfo {
-                    path: path.clone(),
-                    hash,
-                    resolution,
-                });
-            }
-            Err(e) => {
-                eprintln!("Warning: Failed to hash {}: {}", path, e);
-            }
+        match hash_one(path, algorithm) {
+            Ok(info) => images.push(info),
+            Err(e) => eprintln!("Warning: Failed to hash {}: {}", path, e),
         }
     }
 
@@ -60,26 +68,14 @@ pub fn find_duplicates_parallel(
     algorithm: HashAlgorithm,
     threshold: u32,
 ) -> Result<Vec<DuplicateGroup>, String> {
-    // Compute hashes in parallel
-    let images: Vec<ImageInfo> = paths
-        .par_iter()
-        .filter_map(|path| {
-            ImageHash::from_path(path, algorithm, 8).ok().map(|hash| {
-                let resolution = get_image_resolution(path).unwrap_or(0);
-                ImageInfo {
-                    path: path.clone(),
-                    hash,
-                    resolution,
-                }
-            })
-        })
-        .collect();
-
-    group_duplicates(images, threshold)
+    group_duplicates(hash_images_parallel(paths, algorithm), threshold)
 }
 
-/// Group images by similarity
-fn group_duplicates(images: Vec<ImageInfo>, threshold: u32) -> Result<Vec<DuplicateGroup>, String> {
+/// Group already-hashed images by similarity
+pub fn group_duplicates(
+    images: Vec<ImageInfo>,
+    threshold: u32,
+) -> Result<Vec<DuplicateGroup>, String> {
     if images.is_empty() {
         return Ok(Vec::new());
     }
@@ -113,12 +109,27 @@ fn group_duplicates(images: Vec<ImageInfo>, threshold: u32) -> Result<Vec<Duplic
         }
     }
 
-    // Compare all pairs and union similar images
-    for i in 0..n {
-        for j in (i + 1)..n {
-            let dist = images[i].hash.distance(&images[j].hash);
-            if dist <= threshold {
-                union(&mut parent, &mut rank, i, j);
+    // Compare all pairs and union similar images. Standard 64-bit hashes are
+    // compared as single words (one XOR + popcount per pair).
+    let words: Option<Vec<u64>> = images.iter().map(|image| image.hash.as_u64()).collect();
+    match words {
+        Some(words) => {
+            for i in 0..n {
+                let word = words[i];
+                for (j, other) in words.iter().enumerate().skip(i + 1) {
+                    if (word ^ other).count_ones() <= threshold {
+                        union(&mut parent, &mut rank, i, j);
+                    }
+                }
+            }
+        }
+        None => {
+            for i in 0..n {
+                for j in (i + 1)..n {
+                    if images[i].hash.distance(&images[j].hash) <= threshold {
+                        union(&mut parent, &mut rank, i, j);
+                    }
+                }
             }
         }
     }
@@ -160,20 +171,49 @@ fn group_duplicates(images: Vec<ImageInfo>, threshold: u32) -> Result<Vec<Duplic
     Ok(result)
 }
 
-/// Get image resolution (width * height)
-fn get_image_resolution(path: &str) -> Result<u64, String> {
-    let img = image::open(path).map_err(|e| e.to_string())?;
-    let (w, h) = img.dimensions();
-    Ok(w as u64 * h as u64)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn info(path: &str, hex: &str, resolution: u64) -> ImageInfo {
+        ImageInfo {
+            path: path.to_string(),
+            hash: ImageHash::from_hex(hex).unwrap(),
+            resolution,
+        }
+    }
 
     #[test]
     fn test_empty_input() {
         let result = find_duplicates(&[], HashAlgorithm::PHash, 10).unwrap();
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_groups_precomputed_hashes_and_picks_largest() {
+        let images = vec![
+            info("small.jpg", "ff00ff00ff00ff00", 100),
+            info("large.jpg", "ff00ff00ff00ff01", 400),
+            info("other.jpg", "00ff00ff00ff00ff", 900),
+        ];
+        let mut groups = group_duplicates(images, 2).unwrap();
+        groups.sort_by_key(|g| g.paths.len());
+
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].paths, vec!["other.jpg"]);
+        assert_eq!(groups[1].paths, vec!["large.jpg", "small.jpg"]);
+        assert_eq!(groups[1].best_path, "large.jpg");
+    }
+
+    #[test]
+    fn test_threshold_zero_only_groups_identical_hashes() {
+        let images = vec![
+            info("a.jpg", "ff00ff00ff00ff00", 1),
+            info("b.jpg", "ff00ff00ff00ff00", 2),
+            info("c.jpg", "ff00ff00ff00ff01", 3),
+        ];
+        let groups = group_duplicates(images, 0).unwrap();
+        assert_eq!(groups.iter().filter(|g| g.paths.len() == 2).count(), 1);
+        assert_eq!(groups.iter().filter(|g| g.paths.len() == 1).count(), 1);
     }
 }

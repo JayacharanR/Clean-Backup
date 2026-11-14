@@ -1,4 +1,13 @@
-"""Durable local operation journals and conflict-aware, retryable undo."""
+"""Durable local operation journals and conflict-aware, retryable undo.
+
+A journal is an append-only log, one JSON record per line. A record is either
+a full action (it has an ``id`` and an ``action``) or an update to an earlier
+action (``{"_update": <id>, ...changed fields}``; a ``null`` value removes the
+field). Each state change is one fsynced append, so journaling a session costs
+time proportional to its length rather than to its square. A final line cut
+short by a crash was never durable and is ignored. Journals written by earlier
+versions as a single JSON array remain readable.
+"""
 
 from datetime import datetime
 import json
@@ -22,19 +31,83 @@ from src.logger import logger
 JOURNAL_DIR = Path("logs/undo_journals")
 
 
+# Fields that change after an action is first recorded.
+_MUTABLE_FIELDS = ("state", "output_identity", "restore_identity", "undo_phase", "error")
+
+
+def _line(record):
+    return json.dumps(record, separators=(",", ":")) + "\n"
+
+
+def _update_record(entry):
+    """The current mutable fields of *entry*; absent ones are recorded as removed."""
+    return {"_update": entry["id"], **{key: entry.get(key) for key in _MUTABLE_FIELDS}}
+
+
+def _parse_journal(text):
+    """Return ``(actions, appendable)`` for a journal's text."""
+    if text.lstrip().startswith("["):
+        actions = json.loads(text)  # Earlier single-array format.
+        if not isinstance(actions, list) or not all(isinstance(a, dict) for a in actions):
+            raise ValueError("Malformed journal")
+        return actions, False
+
+    actions, by_id = [], {}
+    *complete, tail = text.split("\n")
+    for line in complete:
+        if not line.strip():
+            continue
+        record = json.loads(line)
+        if not isinstance(record, dict):
+            raise ValueError("Malformed journal record")
+        if "_update" in record:
+            entry = by_id.get(record.pop("_update"))
+            if entry is None:
+                raise ValueError("Journal update refers to an unknown action")
+            for key, value in record.items():
+                if value is None:
+                    entry.pop(key, None)
+                else:
+                    entry[key] = value
+        else:
+            actions.append(record)
+            if "id" in record:
+                by_id[record["id"]] = record
+    # A non-empty tail is a record whose append was interrupted: not durable.
+    appendable = not tail and len(by_id) == len(actions)
+    return actions, appendable
+
+
+def load_journal(path):
+    """Read a journal's actions with every recorded update applied."""
+    return _parse_journal(Path(path).read_text())[0]
+
+
 def _write_journal(path, actions):
-    """Never truncate the only durable copy of a journal."""
+    """Atomically replace a journal; never truncate its only durable copy."""
     fd, name = tempfile.mkstemp(prefix=".journal-", suffix=".tmp", dir=path.parent)
     temporary = Path(name)
     try:
         with os.fdopen(fd, "w") as stream:
-            json.dump(actions, stream, indent=2)
+            stream.writelines(_line(action) for action in actions)
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)
         fsync_directory(path.parent)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def _append_journal(path, records):
+    """Durably append records to an existing journal."""
+    data = "".join(_line(record) for record in records).encode()
+    fd = os.open(path, os.O_WRONLY | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        while data:
+            data = data[os.write(fd, data):]
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 
 
 def _session_lock(path):
@@ -58,6 +131,7 @@ class UndoManager:
         self.session_id = None
         self.journal_path = None
         self.actions = []
+        self._unsaved = []  # Records not yet durable in the journal file.
         self._lock = threading.RLock()
         self._session_fd = None
 
@@ -82,18 +156,22 @@ class UndoManager:
             )
             self.journal_path = self.journal_dir / f"journal_{self.session_id}.json"
             self.actions = []
+            self._unsaved = []
             self._session_fd = _session_lock(self.journal_path)
             try:
-                self._save_journal()
+                _write_journal(self.journal_path, [])
             except BaseException:
                 self.end_session()
                 raise
             return self.session_id
 
     def _save_journal(self):
+        """Make every recorded change durable; a failure leaves it queued."""
         if self.journal_path is None:
             raise RuntimeError("No active journal")
-        _write_journal(self.journal_path, self.actions)
+        if self._unsaved:
+            _append_journal(self.journal_path, self._unsaved)
+            self._unsaved = []
 
     def prepare_action(self, action, src, dst, source_identity, output_identity):
         """Record intent before a verified temporary output is published."""
@@ -111,18 +189,21 @@ class UndoManager:
                 "timestamp": datetime.now().isoformat(),
             }
             self.actions.append(entry)
+            self._unsaved.append(dict(entry))
             self._save_journal()  # An error propagates and prevents publication.
             return entry
 
     def cancel_action(self, entry):
         with self._lock:
             entry["state"] = "cancelled"
+            self._unsaved.append(_update_record(entry))
             self._save_journal()
 
     def complete_action(self, entry, output_identity):
         with self._lock:
             entry["output_identity"] = output_identity
             entry["state"] = "completed"
+            self._unsaved.append(_update_record(entry))
             self._save_journal()
 
     def log_action(self, action_type, src, dst):
@@ -156,6 +237,7 @@ class UndoManager:
                 self._session_fd = None
                 self.session_id = None
                 self.actions = []
+                self._unsaved = []
                 self.journal_path = None
 
     def list_sessions(self):
@@ -164,7 +246,7 @@ class UndoManager:
             fd = None
             try:
                 fd = _session_lock(path)
-                actions = json.loads(path.read_text())
+                actions = load_journal(path)
                 count = sum(
                     a.get("state") not in {"undone", "cancelled"} for a in actions
                 )
@@ -244,14 +326,27 @@ class UndoManager:
         fd = None
         try:
             fd = _session_lock(path)
-            actions = json.loads(path.read_text())
+            actions, appendable = _parse_journal(path.read_text())
 
-            def save():
+            def persist(entry):
+                nonlocal appendable
+                if appendable:
+                    _append_journal(path, [_update_record(entry)])
+                    return
+                # Earlier array format, or a record cut short by a crash:
+                # rewrite once as a clean log, then append from there on.
+                for action in actions:
+                    action.setdefault("id", uuid.uuid4().hex)
                 _write_journal(path, actions)
+                appendable = True
 
             for entry in reversed(actions):
                 if entry.get("state") in {"undone", "cancelled"}:
                     continue
+
+                def save(entry=entry):
+                    persist(entry)
+
                 try:
                     self._undo_entry(entry, save)
                     entry["state"] = "undone"

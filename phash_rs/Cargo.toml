@@ -11,7 +11,9 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 pyo3 = { version = "0.22", features = ["extension-module", "abi3-py310"] }
-image = "0.25"
+# Only the formats the app scans (see src/constants.py); the default feature
+# set also builds AVIF, EXR, HDR, DDS and other codecs that are never reached.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "bmp", "tiff", "webp", "rayon"] }
 rayon = "1.10"
 
 [profile.release]
