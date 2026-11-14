@@ -1,8 +1,9 @@
 .git
 .venv
-node_modules
-target
-__pycache__
+**/node_modules
+# Rust build output (phash_rs/target is over a gigabyte)
+**/target
+**/__pycache__
 *.pyc
 *.pyo
 *.pyd

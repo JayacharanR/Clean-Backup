@@ -24,6 +24,7 @@ Nothing here claims the project is free of defects.
 | Undo 1,000 moved files | 49.8 s | 1.7 s |
 | Rust extension (`phash_rs.abi3.so`) | 2.46 MB | 1.85 MB |
 | Rust dependency tree (`cargo tree` lines) | 195 | 98 |
+| Docker image, built from this working tree | 6.04 GB | 1.72 GB |
 
 ## Findings
 
@@ -71,6 +72,7 @@ identical to `.env.example`. No rotation is required as a result of this audit.
 | P2 | Rust hashing held Python's GIL, so status polling stalled during each batch. | A 10 ms background thread now runs at 99 % of its ideal rate during hashing. No "before" figure was recorded. | **Fixed.** |
 | P3 | Every journal state change rewrote and fsynced the whole journal: cost grew with the square of the session. | Organize (copy) 250 / 500 / 1,000 / 2,000 files: 1.5 / 4.6 / 16.0 / 61.2 s → 1.2 / 2.4 / 4.7 / 9.4 s. Undo 500 / 1,000: 13.0 / 49.8 s → 0.85 / 1.70 s. | **Fixed** with an append-only journal (see below). |
 | P4 | The Rust `image` dependency was built with every default codec. | Extension 2.46 MB → 1.85 MB; `cargo tree` 195 → 98 lines. | **Fixed.** Formats compiled in: JPEG, PNG, GIF, BMP, TIFF, WebP. |
+| P5 | `.dockerignore` listed `target`, which matches only a top-level directory, so `phash_rs/target` (1.4 GB of Rust build output) was sent to the daemon and copied into the image; a final `chown -R /app` then stored a second copy of every application file, including the 275 MB of models. | Local build context 1.72 GB → under 300 MB; image 6.04 GB → 1.72 GB (`COPY . .` layer 1.73 GB → 282 MB, `chown` layer 1.77 GB → 102 kB). A CI build has no `target/`, so there the saving is the duplicated layer, about 280 MB. | **Fixed.** |
 
 Benchmarks ran on the development machine with tiny (2 KB) files for the
 organize/undo measurements, so they isolate journaling overhead; real media adds
@@ -135,7 +137,12 @@ Rust dependencies were not checked against an advisory database
 - A real server was started and probed with `curl`: loopback bind, health,
   frontend served, foreign `Host` → 403, cross-origin POST → 403, same-origin
   POST → 200.
-- Docker image build and container smoke test: see "Docker" below.
+- The Docker image was built from the final tree and a container was driven
+  through the API: health reports the Rust backend, the frontend is served,
+  a foreign `Host` and a cross-origin POST get 403, the three models pass their
+  checksums, and a scan → thumbnail → Trash → undo cycle on a mounted folder
+  restored the file. Trash crosses filesystems in a container (bind mount to
+  container storage), which the previous `rename` could not do.
 
 ### Not verified
 
@@ -154,30 +161,32 @@ Ordered by priority.
    by default, but anyone who can reach the port — after opting in to LAN
    exposure — has full control of the mounted library. A shared secret or
    login is the real fix.
-2. **Deletion trusts the client** for which image is the "best" in a group
+2. **Job outcome.** An organize or compression job whose every file fails
+   still ends as "completed" with an error count rather than "failed".
+3. **Deletion trusts the client** for which image is the "best" in a group
    (`is_best` comes from the request). Server-owned deletion plans remain open
    (F04 in the earlier audit).
-3. **The container runs Flask's development server.** Use a production WSGI
+4. **The container runs Flask's development server.** Use a production WSGI
    server (for example waitress or gunicorn with threads).
-4. **CLI duplicate move/copy/delete** still uses unverified `shutil` operations;
+5. **CLI duplicate move/copy/delete** still uses unverified `shutil` operations;
    CLI delete is permanent with a single confirmation.
-5. **Compression** fidelity limits (metadata, animation, HDR) are unchanged (F08).
-6. **Cloud sync** identifies remote files by name and folder, not by stored
+6. **Compression** fidelity limits (metadata, animation, HDR) are unchanged (F08).
+7. **Cloud sync** identifies remote files by name and folder, not by stored
    file id (F27); the throttle is a per-file delay, not a rate limit.
-7. **Repository size.** History contains a 261 MB model file and Rust `target/`
+8. **Repository size.** History contains a 261 MB model file and Rust `target/`
    build output (362 MB pack). Removing them requires rewriting history and
    force-pushing, which needs the owner's decision.
-8. **Image size.** The face-embedding model is ArcFace ResNet100 (261 MB, saved
+9. **Image size.** The face-embedding model is ArcFace ResNet100 (261 MB, saved
    as `mobilefacenet.onnx`); the scene model saved as `mobilenetv3_small.onnx`
    is MobileNetV2. Switching to an actual MobileFaceNet would remove roughly
    250 MB but changes recognition behaviour.
-9. **Scan speed** is now dominated by full-resolution JPEG decoding. Scaled
+10. **Scan speed** is now dominated by full-resolution JPEG decoding. Scaled
    decoding would be several times faster but changes hash values, so it needs
    re-validation of duplicate detection first. Grouping remains O(n²).
-10. **Docker inputs.** Base images (`rust:slim`, `node:20-slim`,
+11. **Docker inputs.** Base images (`rust:slim`, `node:20-slim`,
     `python:3.12-slim`) and `maturin` are not pinned to digests/versions.
-11. **Vite major upgrade** to clear the two remaining dev-server advisories.
-12. Carried over from the earlier audit: hard-link requirement for publication
+12. **Vite major upgrade** to clear the two remaining dev-server advisories.
+13. Carried over from the earlier audit: hard-link requirement for publication
     (no FAT/exFAT), leftover `.clean-backup-*.partial` files after a crash,
     perceptual matching being heuristic, symlinks created by classification are
     not journaled.

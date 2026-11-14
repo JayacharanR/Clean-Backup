@@ -45,21 +45,22 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY --from=rust-builder /build/phash_rs/dist/*.whl /tmp/
 RUN pip install --no-cache-dir /tmp/*.whl && rm -f /tmp/*.whl
 
-# Copy application source BEFORE model download so models aren't overwritten
-COPY . .
-
-# Copy frontend static build from Stage 2 (overwrites the source web/dist)
-COPY --from=frontend-builder /build/web/dist ./web/dist
-
-# Download ONNX models — runs AFTER COPY . . so models persist in the layer
-RUN python src/classify/models/download_models.py
-
-# Set up non-root user
+# Run as a non-root user. Ownership is set while copying: a later
+# `chown -R /app` would store a second copy of every file in a new layer.
 RUN useradd -m -u 1000 appuser \
     && mkdir -p /app/data/db /app/data/cache /app/data/config /data/media \
     && chown -R appuser:appuser /app /data/media
 
 USER appuser
+
+# Copy application source BEFORE model download so models aren't overwritten
+COPY --chown=appuser:appuser . .
+
+# Copy frontend static build from Stage 2 (overwrites the source web/dist)
+COPY --chown=appuser:appuser --from=frontend-builder /build/web/dist ./web/dist
+
+# Download ONNX models (checksum-verified) — runs AFTER COPY . . so they persist
+RUN python src/classify/models/download_models.py
 
 # Expose the default port
 EXPOSE 8080
